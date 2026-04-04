@@ -1,0 +1,105 @@
+@import './variables.css';
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+  color: var(--text-primary);
+  background: var(--canvas-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Canvas background — dots are rendered by React Flow's <Background> component */
+.react-flow {
+  background-color: var(--canvas-bg) !important;
+  cursor: default !important;
+}
+
+/* Spacebar panning cursor */
+.react-flow.panning {
+  cursor: grab !important;
+}
+.react-flow.panning:active {
+  cursor: grabbing !important;
+}
+
+/* Override React Flow defaults */
+.react-flow__panel {
+  display: none;
+}
+
+.react-flow__attribution {
+  display: none !important;
+}
+
+.react-flow__edge-path {
+  stroke-width: 1.5;
+}
+
+/* Remove React Flow's default selection outline */
+.react-flow__node.selected {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.react-flow__node:focus {
+  outline: none !important;
+}
+.react-flow__node:focus-visible {
+  outline: none !important;
+}
+
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* Selection */
+::selection {
+  background: rgba(96, 165, 250, 0.3);
+  color: var(--text-primary);
+}
+
+/* Monospace font class */
+.mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* Spinner */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

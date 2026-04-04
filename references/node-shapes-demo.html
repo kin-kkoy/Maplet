@@ -1,0 +1,549 @@
+<!--
+  PROJECT MAP — Node Shape Demo
+  ================================
+
+  FOLDER SHAPE (CSS construction):
+  - The folder body is a rounded rectangle with a slight inset top-left
+  - A ::before pseudo-element creates the "folder tab" — a small rounded
+    trapezoid shape that sits above the top-left of the body
+  - The tab uses border-radius on top corners only and is positioned
+    to overlap the body's top edge, creating the classic folder silhouette
+  - A subtle inner shadow and gradient give it depth
+
+  FILE/DOCUMENT SHAPE (CSS construction):
+  - Uses clip-path: polygon() to cut a triangular notch from the top-right
+    corner, creating a "dog-ear" / folded page effect
+  - A ::before pseudo-element draws the fold triangle in a slightly
+    lighter shade, simulating a turned page corner
+  - The result looks like a physical document at a glance
+
+  PROJECT NODE:
+  - Card-based with a strong amber left accent bar
+  - Double-border treatment with outer glow for visual weight
+  - Intentionally the "heaviest" node to anchor the graph
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node Shapes — Project Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ─── Reset & Canvas ─── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --canvas: #0b1120;
+    --dot: #172040;
+    --blue-50: #eff6ff;
+    --blue-200: #bfdbfe;
+    --blue-400: #60a5fa;
+    --blue-500: #3b82f6;
+    --blue-600: #2563eb;
+    --blue-900: #1e3a5f;
+    --violet-300: #c4b5fd;
+    --violet-400: #a78bfa;
+    --violet-500: #8b5cf6;
+    --violet-900: #2e1f5e;
+    --amber-300: #fcd34d;
+    --amber-400: #f59e0b;
+    --amber-500: #d97706;
+    --amber-900: #3d2800;
+    --slate-300: #cbd5e1;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-700: #334155;
+    --slate-800: #1e293b;
+  }
+
+  body {
+    background: var(--canvas);
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px);
+    background-size: 20px 20px;
+    min-height: 100vh;
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: var(--slate-300);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 40px;
+  }
+
+  .graph {
+    position: relative;
+    width: 960px;
+    height: 560px;
+  }
+
+  /* ─── Connection Lines (SVG) ─── */
+  .connections {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .connections line {
+    stroke: var(--blue-900);
+    stroke-width: 1.5;
+    stroke-dasharray: 6 4;
+  }
+  .connections line.solid {
+    stroke-dasharray: none;
+    stroke: rgba(96, 165, 250, 0.25);
+  }
+
+  /* ═══════════════════════════════════════════
+     PROJECT NODE
+     ═══════════════════════════════════════════ */
+  .node-project {
+    position: absolute;
+    width: 200px;
+    display: flex;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #1a1400 0%, #1c1608 100%);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    box-shadow:
+      0 0 20px rgba(245, 158, 11, 0.08),
+      0 4px 16px rgba(0,0,0,0.4),
+      inset 0 1px 0 rgba(245, 158, 11, 0.1);
+    overflow: hidden;
+  }
+  .node-project__accent {
+    width: 5px;
+    background: linear-gradient(180deg, var(--amber-400), var(--amber-500));
+    flex-shrink: 0;
+  }
+  .node-project__body {
+    padding: 14px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .node-project__icon {
+    font-size: 14px;
+    margin-bottom: 2px;
+    opacity: 0.7;
+  }
+  .node-project__name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--amber-300);
+    letter-spacing: -0.01em;
+  }
+  .node-project__path {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9.5px;
+    color: var(--slate-500);
+  }
+  .node-project .badge {
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--amber-400);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+  }
+
+  /* ═══════════════════════════════════════════
+     FOLDER NODE — shaped like a real folder
+     ═══════════════════════════════════════════ */
+  .node-folder {
+    position: absolute;
+    width: 180px;
+  }
+
+  /* The tab that sticks up */
+  .node-folder__tab {
+    width: 64px;
+    height: 14px;
+    background: linear-gradient(180deg, #15294a 0%, #162848 100%);
+    border: 1px solid rgba(96, 165, 250, 0.18);
+    border-bottom: none;
+    border-radius: 6px 10px 0 0;
+    margin-left: 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* The folder body */
+  .node-folder__body {
+    background: linear-gradient(165deg, #12243f 0%, #0f1f38 60%, #0d1a30 100%);
+    border: 1px solid rgba(96, 165, 250, 0.18);
+    border-radius: 4px 10px 10px 10px;
+    padding: 12px 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    position: relative;
+    box-shadow:
+      0 4px 16px rgba(0,0,0,0.35),
+      0 0 12px rgba(96, 165, 250, 0.04),
+      inset 0 1px 0 rgba(96, 165, 250, 0.06);
+  }
+
+  .node-folder__header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .node-folder__icon {
+    color: var(--blue-400);
+    font-size: 13px;
+    flex-shrink: 0;
+    opacity: 0.85;
+  }
+  .node-folder__name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--blue-200);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .node-folder__path {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9.5px;
+    color: var(--slate-500);
+    padding-left: 19px;
+  }
+  .node-folder .badge {
+    background: rgba(96, 165, 250, 0.08);
+    color: var(--blue-400);
+    border: 1px solid rgba(96, 165, 250, 0.15);
+  }
+
+  /* ═══════════════════════════════════════════
+     FILE NODE — document shape with dog-ear
+     ═══════════════════════════════════════════ */
+  .node-file {
+    position: absolute;
+    width: 170px;
+    position: absolute;
+  }
+
+  .node-file__body {
+    background: linear-gradient(165deg, #1a1535 0%, #151030 60%, #120d28 100%);
+    border: 1px solid rgba(167, 139, 250, 0.18);
+    padding: 12px 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    position: relative;
+    box-shadow:
+      0 4px 16px rgba(0,0,0,0.35),
+      0 0 12px rgba(167, 139, 250, 0.04),
+      inset 0 1px 0 rgba(167, 139, 250, 0.06);
+
+    /* Dog-ear clip on top-right */
+    clip-path: polygon(
+      0 0,
+      calc(100% - 18px) 0,
+      100% 18px,
+      100% 100%,
+      0 100%
+    );
+    border-radius: 6px 0 6px 6px;
+  }
+
+  /* The fold triangle */
+  .node-file__fold {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 18px;
+    height: 18px;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .node-file__fold::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 0 18px 18px 0;
+    border-color: transparent var(--canvas) transparent transparent;
+    filter: brightness(1.2);
+  }
+  .node-file__fold::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 18px;
+    height: 18px;
+    background: linear-gradient(135deg, rgba(167,139,250,0.15) 0%, rgba(167,139,250,0.06) 100%);
+    clip-path: polygon(0 0, 100% 100%, 100% 0);
+  }
+
+  .node-file__header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .node-file__icon {
+    color: var(--violet-400);
+    font-size: 13px;
+    flex-shrink: 0;
+    opacity: 0.85;
+  }
+  .node-file__name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--violet-300);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .node-file__path {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9.5px;
+    color: var(--slate-500);
+    padding-left: 19px;
+  }
+  .node-file .badge {
+    background: rgba(167, 139, 250, 0.08);
+    color: var(--violet-400);
+    border: 1px solid rgba(167, 139, 250, 0.15);
+  }
+
+  /* ─── Shared badge ─── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: fit-content;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 8.5px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 3px;
+    margin-left: 19px;
+  }
+  .badge-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+  }
+
+  /* ─── Hover states ─── */
+  .node-project:hover {
+    border-color: rgba(245, 158, 11, 0.4);
+    box-shadow:
+      0 0 28px rgba(245, 158, 11, 0.12),
+      0 4px 16px rgba(0,0,0,0.4),
+      inset 0 1px 0 rgba(245, 158, 11, 0.15);
+  }
+  .node-folder:hover .node-folder__body {
+    border-color: rgba(96, 165, 250, 0.3);
+    box-shadow:
+      0 4px 20px rgba(0,0,0,0.4),
+      0 0 16px rgba(96, 165, 250, 0.08),
+      inset 0 1px 0 rgba(96, 165, 250, 0.1);
+  }
+  .node-folder:hover .node-folder__tab {
+    border-color: rgba(96, 165, 250, 0.3);
+    background: linear-gradient(180deg, #182e52 0%, #17294a 100%);
+  }
+  .node-file:hover .node-file__body {
+    border-color: rgba(167, 139, 250, 0.3);
+    box-shadow:
+      0 4px 20px rgba(0,0,0,0.4),
+      0 0 16px rgba(167, 139, 250, 0.08),
+      inset 0 1px 0 rgba(167, 139, 250, 0.1);
+  }
+
+  /* ─── Staggered entrance ─── */
+  .node-project, .node-folder, .node-file {
+    animation: nodeIn 500ms ease-out both;
+    cursor: default;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  @keyframes nodeIn {
+    from { opacity: 0; transform: translateX(-16px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .node-project { animation-delay: 0ms; }
+  .node-folder:nth-child(3) { animation-delay: 80ms; }
+  .node-folder:nth-child(4) { animation-delay: 160ms; }
+  .node-folder:nth-child(5) { animation-delay: 240ms; }
+  .node-file:nth-child(6) { animation-delay: 320ms; }
+  .node-file:nth-child(7) { animation-delay: 400ms; }
+  .node-file:nth-child(8) { animation-delay: 480ms; }
+
+  /* ─── Legend ─── */
+  .legend {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 24px;
+    padding: 10px 24px;
+    background: rgba(11, 17, 32, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(96, 165, 250, 0.1);
+    border-radius: 12px;
+    font-size: 11px;
+    color: var(--slate-400);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<div class="graph">
+  <!-- SVG Connection Lines -->
+  <svg class="connections" viewBox="0 0 960 560">
+    <!-- Project → Folders -->
+    <line class="solid" x1="210" y1="268" x2="320" y2="118" />
+    <line class="solid" x1="210" y1="268" x2="320" y2="268" />
+    <line class="solid" x1="210" y1="268" x2="320" y2="418" />
+    <!-- Folder (src) → Files -->
+    <line x1="500" y1="268" x2="620" y2="168" />
+    <line x1="500" y1="268" x2="620" y2="288" />
+    <line x1="500" y1="268" x2="620" y2="408" />
+  </svg>
+
+  <!-- ═══ PROJECT NODE ═══ -->
+  <div class="node-project" style="left: 10px; top: 228px;">
+    <div class="node-project__accent"></div>
+    <div class="node-project__body">
+      <div class="node-project__icon">◆</div>
+      <div class="node-project__name">my-app</div>
+      <div class="node-project__path">~/projects/my-app</div>
+      <div class="badge">
+        <span class="badge-dot" style="background: var(--amber-400)"></span>
+        Project
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ FOLDER NODES ═══ -->
+  <div class="node-folder" style="left: 310px; top: 70px;">
+    <div class="node-folder__tab"></div>
+    <div class="node-folder__body">
+      <div class="node-folder__header">
+        <span class="node-folder__icon">📂</span>
+        <span class="node-folder__name">components</span>
+      </div>
+      <div class="node-folder__path">src/components</div>
+      <div class="badge">
+        <span class="badge-dot" style="background: var(--blue-400)"></span>
+        Folder
+      </div>
+    </div>
+  </div>
+
+  <div class="node-folder" style="left: 310px; top: 220px;">
+    <div class="node-folder__tab"></div>
+    <div class="node-folder__body">
+      <div class="node-folder__header">
+        <span class="node-folder__icon">📂</span>
+        <span class="node-folder__name">src</span>
+      </div>
+      <div class="node-folder__path">src</div>
+      <div class="badge">
+        <span class="badge-dot" style="background: var(--blue-400)"></span>
+        Folder
+      </div>
+    </div>
+  </div>
+
+  <div class="node-folder" style="left: 310px; top: 370px;">
+    <div class="node-folder__tab"></div>
+    <div class="node-folder__body">
+      <div class="node-folder__header">
+        <span class="node-folder__icon">📂</span>
+        <span class="node-folder__name">utils</span>
+      </div>
+      <div class="node-folder__path">src/utils</div>
+      <div class="badge">
+        <span class="badge-dot" style="background: var(--blue-400)"></span>
+        Folder
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ FILE NODES ═══ -->
+  <div class="node-file" style="left: 610px; top: 130px;">
+    <div class="node-file__body">
+      <div class="node-file__fold"></div>
+      <div class="node-file__header">
+        <span class="node-file__icon">📄</span>
+        <span class="node-file__name">App.tsx</span>
+      </div>
+      <div class="node-file__path">.../src/App.tsx</div>
+      <div class="badge">
+        <span class="badge-dot" style="background: var(--violet-400)"></span>
+        File
+      </div>
+    </div>
+  </div>
+
+  <div class="node-file" style="left: 610px; top: 250px;">
+    <div class="node-file__body">
+      <div class="node-file__fold"></div>
+      <div class="node-file__header">
+        <span class="node-file__icon">📄</span>
+        <span class="node-file__name">index.ts</span>
+      </div>
+      <div class="node-file__path">.../src/index.ts</div>
+      <div class="badge">
+        <span class="badge-dot" style="background: var(--violet-400)"></span>
+        File
+      </div>
+    </div>
+  </div>
+
+  <div class="node-file" style="left: 610px; top: 370px;">
+    <div class="node-file__body">
+      <div class="node-file__fold"></div>
+      <div class="node-file__header">
+        <span class="node-file__icon">📄</span>
+        <span class="node-file__name">helpers.ts</span>
+      </div>
+      <div class="node-file__path">.../utils/helpers.ts</div>
+      <div class="badge">
+        <span class="badge-dot" style="background: var(--violet-400)"></span>
+        File
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item">
+    <div class="legend-swatch" style="background: var(--amber-400);"></div>
+    Project
+  </div>
+  <div class="legend-item">
+    <div class="legend-swatch" style="background: var(--blue-400);"></div>
+    Folder
+  </div>
+  <div class="legend-item">
+    <div class="legend-swatch" style="background: var(--violet-400);"></div>
+    File
+  </div>
+</div>
+
+</body>
+</html>

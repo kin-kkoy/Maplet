@@ -1,0 +1,141 @@
+/* Blueprint Technical Theme */
+
+:root,
+[data-theme="dark"] {
+  /* Canvas */
+  --canvas-bg: #0f1729;
+  --canvas-dot: #1e2d4a;
+  --canvas-dot-size: 1.5px;
+  --canvas-dot-spacing: 24px;
+
+  /* Surfaces */
+  --surface-primary: #141e33;
+  --surface-secondary: #1a2744;
+  --surface-elevated: #1e2d4a;
+  --surface-overlay: rgba(15, 23, 41, 0.85);
+  --surface-glass: rgba(20, 30, 51, 0.75);
+
+  /* Borders */
+  --border-subtle: rgba(96, 165, 250, 0.12);
+  --border-default: rgba(96, 165, 250, 0.2);
+  --border-strong: rgba(96, 165, 250, 0.35);
+
+  /* Text */
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-inverse: #0f1729;
+
+  /* Accent colors */
+  --accent-primary: #60a5fa;
+  --accent-project: #f59e0b;
+  --accent-folder: #60a5fa;
+  --accent-file: #a78bfa;
+  --accent-note: #34d399;
+  --accent-package: #fb923c;
+  --accent-hidden: #94a3b8;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 12px rgba(96, 165, 250, 0.15);
+
+  /* Dock */
+  --dock-bg: rgba(20, 30, 51, 0.8);
+  --dock-border: rgba(96, 165, 250, 0.15);
+  --dock-button-hover: rgba(96, 165, 250, 0.12);
+  --dock-button-active: rgba(96, 165, 250, 0.2);
+
+  /* Detail card */
+  --card-bg: #141e33;
+  --card-border: rgba(96, 165, 250, 0.18);
+  --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 16px rgba(96, 165, 250, 0.08);
+
+  /* Node */
+  --node-bg: #1a2744;
+  --node-bg-hover: #1e2d4a;
+  --node-border: rgba(96, 165, 250, 0.15);
+  --node-border-selected: rgba(96, 165, 250, 0.5);
+  --node-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --node-shadow-selected: 0 0 16px rgba(96, 165, 250, 0.2);
+
+  /* Edge */
+  --edge-structural: #3b5998;
+  --edge-cross: #60a5fa;
+  --edge-manual: #34d399;
+
+  /* Misc */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 350ms ease-out;
+}
+
+[data-theme="light"] {
+  /* Canvas */
+  --canvas-bg: #f0f2f5;
+  --canvas-dot: #d0d5dd;
+  --canvas-dot-size: 1.5px;
+  --canvas-dot-spacing: 24px;
+
+  /* Surfaces */
+  --surface-primary: #ffffff;
+  --surface-secondary: #f8f9fb;
+  --surface-elevated: #ffffff;
+  --surface-overlay: rgba(255, 255, 255, 0.9);
+  --surface-glass: rgba(255, 255, 255, 0.8);
+
+  /* Borders */
+  --border-subtle: rgba(15, 23, 41, 0.08);
+  --border-default: rgba(15, 23, 41, 0.15);
+  --border-strong: rgba(15, 23, 41, 0.25);
+
+  /* Text */
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+  --text-inverse: #f8fafc;
+
+  /* Accent colors (slightly deeper for light bg) */
+  --accent-primary: #3b82f6;
+  --accent-project: #d97706;
+  --accent-folder: #2563eb;
+  --accent-file: #7c3aed;
+  --accent-note: #059669;
+  --accent-package: #ea580c;
+  --accent-hidden: #64748b;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-glow: 0 0 12px rgba(59, 130, 246, 0.1);
+
+  /* Dock */
+  --dock-bg: rgba(255, 255, 255, 0.85);
+  --dock-border: rgba(15, 23, 41, 0.1);
+  --dock-button-hover: rgba(15, 23, 41, 0.06);
+  --dock-button-active: rgba(15, 23, 41, 0.1);
+
+  /* Detail card */
+  --card-bg: #ffffff;
+  --card-border: rgba(15, 23, 41, 0.1);
+  --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.1), 0 0 1px rgba(0, 0, 0, 0.05);
+
+  /* Node */
+  --node-bg: #ffffff;
+  --node-bg-hover: #f8f9fb;
+  --node-border: rgba(15, 23, 41, 0.1);
+  --node-border-selected: rgba(59, 130, 246, 0.5);
+  --node-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --node-shadow-selected: 0 0 16px rgba(59, 130, 246, 0.15);
+
+  /* Edge */
+  --edge-structural: #93a9d1;
+  --edge-cross: #3b82f6;
+  --edge-manual: #059669;
+}

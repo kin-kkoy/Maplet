@@ -1,0 +1,136 @@
+/* Floating Bottom Dock */
+.dock {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.dock__bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--dock-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--dock-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg), 0 0 24px rgba(96, 165, 250, 0.05);
+}
+
+.dock__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+  margin: 0 4px;
+}
+
+.dock__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.dock__btn:hover {
+  background: var(--dock-button-hover);
+  color: var(--text-primary);
+}
+
+.dock__btn:active {
+  background: var(--dock-button-active);
+  transform: scale(0.95);
+}
+
+.dock__btn.active {
+  color: var(--accent-primary);
+  background: var(--dock-button-active);
+}
+
+.dock__btn.emphasized {
+  color: var(--accent-primary);
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.2);
+}
+
+.dock__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dock__btn:disabled:hover {
+  background: transparent;
+}
+
+/* Tooltip */
+.dock__btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.dock__btn:hover[data-tooltip]::after {
+  opacity: 1;
+}
+
+/* Context dock (appears above base dock) */
+.dock__context {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--dock-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--dock-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: contextDockIn 200ms ease-out;
+}
+
+@keyframes contextDockIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Scan animation */
+.dock__btn.scanning {
+  animation: scanPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes scanPulse {
+  0%, 100% { color: var(--accent-primary); }
+  50% { color: var(--text-tertiary); }
+}
