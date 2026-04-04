@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Search } from 'lucide-react'
+import { Search, Star } from 'lucide-react'
 import { useProjectStore } from '../store/useProjectStore'
 import { useReactFlow } from '@xyflow/react'
 import type { NodeType } from '../types'
@@ -14,6 +14,7 @@ const ACCENT_MAP: Record<NodeType, string> = {
   package: 'var(--accent-package)',
   hidden_connections_group: 'var(--accent-hidden)',
   config_group: 'var(--accent-hidden)',
+  user_group: 'var(--accent-user-group)',
 }
 
 interface SearchResult {
@@ -21,6 +22,55 @@ interface SearchResult {
   name: string
   path: string
   type: NodeType
+  alias?: string
+  tags: string[]
+  description?: string
+  pinned: boolean
+}
+
+interface ParsedQuery {
+  text: string
+  tagFilter?: string
+  typeFilter?: string
+  extFilter?: string
+  pinnedOnly: boolean
+}
+
+function parseQuery(raw: string): ParsedQuery {
+  let text = raw
+  let tagFilter: string | undefined
+  let typeFilter: string | undefined
+  let extFilter: string | undefined
+  let pinnedOnly = false
+
+  // Extract #tag
+  const tagMatch = text.match(/#(\S+)/)
+  if (tagMatch) {
+    tagFilter = tagMatch[1]
+    text = text.replace(tagMatch[0], '')
+  }
+
+  // Extract @type:X
+  const typeMatch = text.match(/@type:(\S+)/)
+  if (typeMatch) {
+    typeFilter = typeMatch[1]
+    text = text.replace(typeMatch[0], '')
+  }
+
+  // Extract *.ext
+  const extMatch = text.match(/\*\.(\S+)/)
+  if (extMatch) {
+    extFilter = '.' + extMatch[1]
+    text = text.replace(extMatch[0], '')
+  }
+
+  // Extract !pinned
+  if (text.includes('!pinned')) {
+    pinnedOnly = true
+    text = text.replace('!pinned', '')
+  }
+
+  return { text: text.trim(), tagFilter, typeFilter, extFilter, pinnedOnly }
 }
 
 interface SearchOverlayProps {
@@ -33,34 +83,71 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const scannedNodes = useProjectStore((s) => s.scanned.nodes)
   const manualNodes = useProjectStore((s) => s.user.manualNodes)
+  const nodeOverrides = useProjectStore((s) => s.user.nodeOverrides)
   const revealNodes = useProjectStore((s) => s.revealNodes)
   const setSelectedNode = useProjectStore((s) => s.setSelectedNode)
   const setNodeOverride = useProjectStore((s) => s.setNodeOverride)
   const { setCenter } = useReactFlow()
 
-  // Build search index
+  // Build search index with V2 fields
   const allResults = useMemo<SearchResult[]>(() => {
     const results: SearchResult[] = []
     for (const node of Object.values(scannedNodes)) {
-      results.push({ id: node.id, name: node.name, path: node.path, type: node.type })
+      const ov = nodeOverrides[node.id]
+      results.push({
+        id: node.id,
+        name: node.name,
+        path: node.path,
+        type: node.type,
+        alias: ov?.alias,
+        tags: ov?.tags ?? [],
+        description: ov?.description ?? node.description,
+        pinned: ov?.pinned ?? false,
+      })
     }
     for (const node of Object.values(manualNodes)) {
-      results.push({ id: node.id, name: node.name, path: '', type: node.type })
+      const ov = nodeOverrides[node.id]
+      results.push({
+        id: node.id,
+        name: node.name,
+        path: '',
+        type: node.type,
+        alias: ov?.alias,
+        tags: ov?.tags ?? [],
+        description: ov?.description ?? node.description,
+        pinned: ov?.pinned ?? false,
+      })
     }
     return results.sort((a, b) => a.name.localeCompare(b.name))
-  }, [scannedNodes, manualNodes])
+  }, [scannedNodes, manualNodes, nodeOverrides])
 
-  // Filter by query
+  // Filter by query with prefix operators
   const filtered = useMemo(() => {
-    if (!query.trim()) return allResults.slice(0, 20)
-    const q = query.toLowerCase()
+    if (!query.trim()) return allResults.slice(0, 25)
+
+    const parsed = parseQuery(query)
+    const q = parsed.text.toLowerCase()
+
     return allResults
-      .filter(
-        (r) =>
+      .filter((r) => {
+        // Prefix filters
+        if (parsed.pinnedOnly && !r.pinned) return false
+        if (parsed.tagFilter && !r.tags.some((t) => t.toLowerCase().includes(parsed.tagFilter!.toLowerCase()))) return false
+        if (parsed.typeFilter && r.type !== parsed.typeFilter) return false
+        if (parsed.extFilter && r.type === 'file' && !r.name.endsWith(parsed.extFilter)) return false
+        if (parsed.extFilter && r.type !== 'file') return false
+
+        // Text search across all fields
+        if (!q) return true
+        return (
           r.name.toLowerCase().includes(q) ||
-          r.path.toLowerCase().includes(q),
-      )
-      .slice(0, 15)
+          r.path.toLowerCase().includes(q) ||
+          (r.alias?.toLowerCase().includes(q) ?? false) ||
+          (r.description?.toLowerCase().includes(q) ?? false) ||
+          r.tags.some((t) => t.toLowerCase().includes(q))
+        )
+      })
+      .slice(0, 25)
   }, [query, allResults])
 
   useEffect(() => {
@@ -150,9 +237,25 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                   style={{ background: ACCENT_MAP[result.type] }}
                 />
                 <div className="search-result__info">
-                  <div className="search-result__name">{result.name}</div>
+                  <div className="search-result__name">
+                    {result.alias ? (
+                      <><span>{result.alias}</span> <span className="search-result__original">({result.name})</span></>
+                    ) : (
+                      result.name
+                    )}
+                    {result.pinned && (
+                      <Star size={10} className="search-result__pin" />
+                    )}
+                  </div>
                   {result.path && (
                     <div className="search-result__path">{result.path}</div>
+                  )}
+                  {result.tags.length > 0 && (
+                    <div className="search-result__tags">
+                      {result.tags.map((t) => (
+                        <span key={t} className="search-result__tag">{t}</span>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
@@ -163,6 +266,11 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
           <span><kbd>↑↓</kbd> navigate</span>
           <span><kbd>Enter</kbd> jump</span>
           <span><kbd>Esc</kbd> close</span>
+          <span className="search-hint__sep">|</span>
+          <span><kbd>#tag</kbd></span>
+          <span><kbd>@type:</kbd></span>
+          <span><kbd>*.ext</kbd></span>
+          <span><kbd>!pinned</kbd></span>
         </div>
       </div>
     </div>

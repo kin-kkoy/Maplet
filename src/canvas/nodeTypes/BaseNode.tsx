@@ -1,6 +1,6 @@
 import { memo, useCallback, useRef } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { ChevronRight, ChevronUp, ChevronDown, Settings } from 'lucide-react'
+import { ChevronRight, ChevronUp, ChevronDown, Settings, Star } from 'lucide-react'
 import type { ProjectNode, ManualNode } from '../../types'
 import { useProjectStore } from '../../store/useProjectStore'
 import '../../styles/nodes.css'
@@ -12,6 +12,29 @@ let _longPressFired = false
 export function consumeLongPressFired(): boolean {
   if (_longPressFired) { _longPressFired = false; return true }
   return false
+}
+
+/** Chevron panel — the entire right-side section is the clickable button */
+function ExpandChevron({ nodeId, isExpanded }: { nodeId: string; isExpanded: boolean }) {
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    window.dispatchEvent(new CustomEvent('node-chevron-click', {
+      detail: { nodeId, shiftKey: false },
+    }))
+  }, [nodeId])
+
+  return (
+    <button
+      className={`node-chevron-panel ${isExpanded ? 'open' : ''}`}
+      onClick={handleClick}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      aria-label={isExpanded ? 'Collapse' : 'Expand'}
+    >
+      <ChevronRight size={14} />
+    </button>
+  )
 }
 
 interface BaseNodeData {
@@ -58,6 +81,8 @@ export const BaseNode = memo(function BaseNode({ data, id }: NodeProps) {
     parentId,
   } = data as BaseNodeData
   const isDimmed = (data as BaseNodeData).isDimmed as boolean | undefined
+  const isPinned = (data as BaseNodeData).isPinned as boolean | undefined
+  const tags = ((data as BaseNodeData).tags as string[] | undefined) ?? []
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onPointerDown = useCallback(() => {
@@ -146,15 +171,31 @@ export const BaseNode = memo(function BaseNode({ data, id }: NodeProps) {
     </div>
   ) : null
 
+  const pinIndicator = isPinned ? (
+    <span className="node-pin"><Star size={10} /></span>
+  ) : null
+
+  const tagPills = tags.length > 0 ? (
+    <div className="node-tags">
+      {tags.slice(0, 3).map((t) => (
+        <span key={t} className="node-tag">{t}</span>
+      ))}
+      {tags.length > 3 && <span className="node-tag">+{tags.length - 3}</span>}
+    </div>
+  ) : null
+
   // ─── Config group: circular ───
   if (nodeType === 'config_group') {
     return (
       <>
         <NodeHandles />
-        <div className={`map-node-circle ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''} ${isDimmed ? 'dimmed' : ''}`}
-          onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
-          <div className="map-node-circle__icon"><Settings size={18} /></div>
-          <div className="map-node-circle__label">{label}</div>
+        <div className="node-outer">
+          <div className={`map-node-circle ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''} ${isDimmed ? 'dimmed' : ''}`}
+            onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
+            <div className="map-node-circle__icon"><Settings size={18} /></div>
+            <div className="map-node-circle__label">{label}</div>
+          </div>
+          {nodeHasChildren && <ExpandChevron nodeId={id} isExpanded={isExpanded} />}
         </div>
       </>
     )
@@ -165,9 +206,12 @@ export const BaseNode = memo(function BaseNode({ data, id }: NodeProps) {
     return (
       <>
         <NodeHandles />
-        <div className={`node-helper ${isSelected ? 'selected' : ''} ${isDimmed ? 'dimmed' : ''}`}
-          onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
-          <div className="node-helper__name">{label}</div>
+        <div className="node-outer">
+          <div className={`node-helper ${isSelected ? 'selected' : ''} ${isDimmed ? 'dimmed' : ''}`}
+            onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
+            <div className="node-helper__name">{label}</div>
+          </div>
+          {nodeHasChildren && <ExpandChevron nodeId={id} isExpanded={isExpanded} />}
         </div>
       </>
     )
@@ -178,19 +222,19 @@ export const BaseNode = memo(function BaseNode({ data, id }: NodeProps) {
     return (
       <>
         <NodeHandles />
-        <div className={`node-project ${isSelected ? 'selected' : ''} ${isDimmed ? 'dimmed' : ''}`}
-          onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
-          <div className="node-project__accent" />
-          <div className="node-project__body">
-            <div className="node-project__name">
-              {label}
-              {nodeHasChildren && (
-                <span className={`node-chevron ${isExpanded ? 'open' : ''}`}>
-                  <ChevronRight size={12} />
-                </span>
-              )}
+        <div className="node-outer">
+          <div className={`node-project ${isSelected ? 'selected' : ''} ${isDimmed ? 'dimmed' : ''}`}
+            onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
+            {pinIndicator}
+            <div className="node-project__accent" />
+            <div className="node-project__body">
+              <div className="node-project__content">
+                <div className="node-project__name">{label}</div>
+                {shortenedPath && <div className="node-project__path">{shortenedPath}</div>}
+                {tagPills}
+              </div>
+              {nodeHasChildren && <ExpandChevron nodeId={id} isExpanded={isExpanded} />}
             </div>
-            {shortenedPath && <div className="node-project__path">{shortenedPath}</div>}
           </div>
         </div>
       </>
@@ -210,20 +254,20 @@ export const BaseNode = memo(function BaseNode({ data, id }: NodeProps) {
     return (
       <>
         <NodeHandles />
-        <div className={wrapClasses}
-          onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
-          <div className="node-folder__tab" />
-          <div className="node-folder__body">
+        <div className="node-outer">
+          <div className={wrapClasses}
+            onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
             {reorderArrows}
-            <div className="node-folder__name">
-              {label}
-              {nodeHasChildren && (
-                <span className={`node-chevron ${isExpanded ? 'open' : ''}`}>
-                  <ChevronRight size={12} />
-                </span>
-              )}
+            {pinIndicator}
+            <div className="node-folder__tab" />
+            <div className="node-folder__body">
+              <div className="node-folder__content">
+                <div className="node-folder__name">{label}</div>
+                {shortenedPath && <div className="node-folder__path">{shortenedPath}</div>}
+                {tagPills}
+              </div>
+              {nodeHasChildren && <ExpandChevron nodeId={id} isExpanded={isExpanded} />}
             </div>
-            {shortenedPath && <div className="node-folder__path">{shortenedPath}</div>}
           </div>
         </div>
       </>
@@ -241,34 +285,64 @@ export const BaseNode = memo(function BaseNode({ data, id }: NodeProps) {
     return (
       <>
         <NodeHandles />
-        <div className={wrapClasses}
-          onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
-          <div className="node-file__body">
+        <div className="node-outer">
+          <div className={wrapClasses}
+            onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
             {reorderArrows}
-            <div className="node-file__fold" />
-            <div className="node-file__name">
-              {label}
-              {nodeHasChildren && (
-                <span className={`node-chevron ${isExpanded ? 'open' : ''}`}>
-                  <ChevronRight size={12} />
-                </span>
-              )}
+            {pinIndicator}
+            <div className="node-file__body">
+              <div className="node-file__fold" />
+              <div className="node-file__content">
+                <div className="node-file__name">{label}</div>
+                {shortenedPath && <div className="node-file__path">{shortenedPath}</div>}
+                {tagPills}
+              </div>
+              {nodeHasChildren && <ExpandChevron nodeId={id} isExpanded={isExpanded} />}
             </div>
-            {shortenedPath && <div className="node-file__path">{shortenedPath}</div>}
           </div>
         </div>
       </>
     )
   }
 
-  // ─── Fallback ───
+  // ─── User group node ───
+  if (nodeType === 'user_group') {
+    const groupColor = ('color' in nodeData && nodeData.color) || 'var(--accent-user-group)'
+    return (
+      <>
+        <NodeHandles />
+        <div className="node-outer">
+          <div className={`node-user-group ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''} ${isDimmed ? 'dimmed' : ''}`}
+            onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
+            {reorderArrows}
+            {pinIndicator}
+            <div className="node-user-group__accent" style={{ background: groupColor }} />
+            <div className="node-user-group__body">
+              <div className="node-user-group__content">
+                <div className="node-user-group__name">{label}</div>
+                {tagPills}
+              </div>
+              {nodeHasChildren && <ExpandChevron nodeId={id} isExpanded={isExpanded} />}
+            </div>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  // ─── Fallback (note + other) ───
   return (
     <>
       <NodeHandles />
-      <div className={`node-helper ${isSelected ? 'selected' : ''} ${isDimmed ? 'dimmed' : ''}`}
-        onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
+      <div className="node-outer">
+        <div className={`node-helper ${isSelected ? 'selected' : ''} ${isDimmed ? 'dimmed' : ''}`}
+          onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave}>
+          {pinIndicator}
+          <div className="node-helper__name">{label}</div>
+          {tagPills}
+        </div>
+        {nodeHasChildren && <ExpandChevron nodeId={id} isExpanded={isExpanded} />}
         {reorderArrows}
-        <div className="node-helper__name">{label}</div>
       </div>
     </>
   )

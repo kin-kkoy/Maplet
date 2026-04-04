@@ -1,5 +1,5 @@
 import type { ProjectMapSchema } from '../types'
-import { createEmptyProjectMap } from '../types'
+import { createEmptyProjectMap, DEFAULT_FILTERS } from '../types'
 
 const STORAGE_PREFIX = 'projectmap:'
 
@@ -24,6 +24,12 @@ export function loadProjectMap(projectName: string): ProjectMapSchema {
     const data = JSON.parse(raw) as ProjectMapSchema
     // Backfill fields added after initial schema
     if (!data.user.childOrder) data.user.childOrder = {}
+    // V2 backfills
+    if (!data.user.userGroups) data.user.userGroups = {}
+    if (!data.user.suppressedEdges) data.user.suppressedEdges = []
+    if (!data.user.uiState.filters) {
+      data.user.uiState.filters = { ...DEFAULT_FILTERS }
+    }
     return data
   } catch {
     console.warn(`Corrupt project map for "${projectName}", starting fresh`)

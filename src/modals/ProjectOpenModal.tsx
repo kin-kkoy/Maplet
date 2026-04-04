@@ -76,6 +76,13 @@ export function ProjectOpenModal() {
         structResult.edges,
       )
 
+      // Store alias config in meta if found
+      if (relResult.aliasConfig) {
+        useProjectStore.setState((s) => ({
+          meta: { ...s.meta, aliasConfig: relResult.aliasConfig ?? undefined },
+        }))
+      }
+
       setScanResult({
         nodes: { ...structResult.nodes, ...relResult.nodes },
         edges: { ...structResult.edges, ...relResult.edges },

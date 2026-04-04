@@ -27,9 +27,12 @@ const ES_EXPORT_FROM = /export\s+(?:[\s\S]*?\s+from\s+)['"]([^'"]+)['"]/g
 // Matches: require('specifier') or require("specifier")
 const CJS_REQUIRE = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g
 
+export type ImportKind = 'code' | 'css' | 'asset'
+
 export interface ParsedImport {
   specifier: string
   isLocal: boolean // starts with . or /
+  importKind: ImportKind
 }
 
 export function parseImports(content: string): ParsedImport[] {
@@ -55,7 +58,19 @@ export function parseImports(content: string): ParsedImport[] {
   return Array.from(specifiers).map((specifier) => ({
     specifier,
     isLocal: specifier.startsWith('.') || specifier.startsWith('/'),
+    importKind: classifyImport(specifier),
   }))
+}
+
+function classifyImport(specifier: string): ImportKind {
+  if (/\.css$/.test(specifier)) return 'css'
+  if (/\.s[ac]ss$/.test(specifier)) return 'css'
+  if (/\.less$/.test(specifier)) return 'css'
+  if (/\.(png|jpe?g|gif|svg|webp|ico|avif|bmp|tiff?)$/i.test(specifier)) return 'asset'
+  if (/\.(woff2?|ttf|eot|otf)$/i.test(specifier)) return 'asset'
+  if (/\.(mp4|webm|ogg|mp3|wav|flac)$/i.test(specifier)) return 'asset'
+  if (/\.(pdf|json5?)$/i.test(specifier)) return 'asset'
+  return 'code'
 }
 
 /**

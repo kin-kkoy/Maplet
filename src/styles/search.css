@@ -128,3 +128,39 @@
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
 }
+
+.search-hint__sep {
+  color: var(--border-default);
+}
+
+.search-result__name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-result__original {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.search-result__pin {
+  color: var(--pin-color);
+  flex-shrink: 0;
+}
+
+.search-result__tags {
+  display: flex;
+  gap: 3px;
+  margin-top: 1px;
+}
+
+.search-result__tag {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--tag-bg);
+  color: var(--tag-text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  font-weight: 500;
+}

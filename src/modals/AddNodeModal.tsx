@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
-import { StickyNote, X } from 'lucide-react'
+import { StickyNote, FolderPlus, X } from 'lucide-react'
 import { useProjectStore } from '../store/useProjectStore'
-import type { ManualNode } from '../types'
+import type { ManualNode, UserGroup } from '../types'
 import '../styles/modals.css'
+
+const GROUP_COLORS = [
+  '#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#fb923c',
+  '#a78bfa', '#f87171', '#38bdf8', '#4ade80', '#e879f9',
+]
 
 interface AddNodeModalProps {
   onClose: () => void
@@ -11,9 +16,12 @@ interface AddNodeModalProps {
 
 export function AddNodeModal({ onClose, viewportCenter }: AddNodeModalProps) {
   const [step, setStep] = useState<'type' | 'name'>('type')
+  const [selectedType, setSelectedType] = useState<'note' | 'user_group'>('note')
   const [name, setName] = useState('')
+  const [color, setColor] = useState(GROUP_COLORS[0]!)
   const inputRef = useRef<HTMLInputElement>(null)
   const addManualNode = useProjectStore((s) => s.addManualNode)
+  const addUserGroup = useProjectStore((s) => s.addUserGroup)
   const revealNodes = useProjectStore((s) => s.revealNodes)
   const setNodeOverride = useProjectStore((s) => s.setNodeOverride)
   const setSelectedNode = useProjectStore((s) => s.setSelectedNode)
@@ -32,27 +40,42 @@ export function AddNodeModal({ onClose, viewportCenter }: AddNodeModalProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  const handleSelectType = () => {
-    // V1 only supports adding notes manually
+  const handleSelectType = (type: 'note' | 'user_group') => {
+    setSelectedType(type)
     setStep('name')
   }
 
   const handleSave = () => {
     if (!name.trim()) return
 
-    const id = `note:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const node: ManualNode = {
-      id,
-      type: 'note',
-      name: name.trim(),
-      status: 'active',
+    useProjectStore.getState().pushUndoSnapshot()
+
+    if (selectedType === 'note') {
+      const id = `note:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const node: ManualNode = {
+        id,
+        type: 'note',
+        name: name.trim(),
+        status: 'active',
+      }
+      addManualNode(node)
+      setNodeOverride(id, { position: viewportCenter })
+      revealNodes([id])
+      setSelectedNode(id)
+    } else {
+      const id = `usergroup:${Date.now()}`
+      const group: UserGroup = {
+        id,
+        name: name.trim(),
+        color,
+        memberNodeIds: [],
+      }
+      addUserGroup(group)
+      setNodeOverride(id, { position: viewportCenter })
+      revealNodes([id])
+      setSelectedNode(id)
     }
 
-    useProjectStore.getState().pushUndoSnapshot()
-    addManualNode(node)
-    setNodeOverride(id, { position: viewportCenter })
-    revealNodes([id])
-    setSelectedNode(id)
     onClose()
   }
 
@@ -65,7 +88,7 @@ export function AddNodeModal({ onClose, viewportCenter }: AddNodeModalProps) {
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="modal-title">
-            {step === 'type' ? 'Add Node' : 'Name your note'}
+            {step === 'type' ? 'Add Node' : selectedType === 'note' ? 'Name your note' : 'Name your group'}
           </div>
           <button className="detail-card__close" onClick={onClose}>
             <X size={14} />
@@ -73,26 +96,44 @@ export function AddNodeModal({ onClose, viewportCenter }: AddNodeModalProps) {
         </div>
 
         {step === 'type' ? (
-          <button className="modal-open-btn" onClick={handleSelectType}>
-            <StickyNote size={18} />
-            Note
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="modal-open-btn" onClick={() => handleSelectType('note')}>
+              <StickyNote size={18} />
+              Note
+            </button>
+            <button className="modal-open-btn" onClick={() => handleSelectType('user_group')}>
+              <FolderPlus size={18} />
+              Group
+            </button>
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <input
               ref={inputRef}
               className="modal-path-input"
-              placeholder="Enter note name..."
+              placeholder={selectedType === 'note' ? 'Enter note name...' : 'Enter group name...'}
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={handleKeyDown}
             />
+            {selectedType === 'user_group' && (
+              <div className="group-modal__colors">
+                {GROUP_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    className={`group-modal__color-pick ${color === c ? 'active' : ''}`}
+                    style={{ background: c }}
+                    onClick={() => setColor(c)}
+                  />
+                ))}
+              </div>
+            )}
             <button
               className="modal-open-btn"
               onClick={handleSave}
               disabled={!name.trim()}
             >
-              Create Note
+              {selectedType === 'note' ? 'Create Note' : 'Create Group'}
             </button>
           </div>
         )}

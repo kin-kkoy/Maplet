@@ -20,6 +20,12 @@ const SHORTCUTS = [
     { keys: ['Click again'], desc: 'Collapse — move connected nodes back to their real parent' },
     { keys: ['Shift', 'Click'], desc: 'Force collapse — hide connected nodes everywhere' },
   ]},
+  { category: 'Search Operators', items: [
+    { keys: ['#tag'], desc: 'Filter by tag name' },
+    { keys: ['@type:file'], desc: 'Filter by node type' },
+    { keys: ['*.tsx'], desc: 'Filter by file extension' },
+    { keys: ['!pinned'], desc: 'Show only pinned nodes' },
+  ]},
   { category: 'General', items: [
     { keys: ['Ctrl', 'Z'], desc: 'Undo' },
     { keys: ['Ctrl', 'Shift', 'Z'], desc: 'Redo' },

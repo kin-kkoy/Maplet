@@ -9,8 +9,10 @@ import type {
   ManualNode,
   ManualEdge,
   NodeOverride,
+  FilterState,
+  UserGroup,
 } from '../types'
-import { createEmptyProjectMap } from '../types'
+import { createEmptyProjectMap, DEFAULT_FILTERS } from '../types'
 import type { FsAdapter } from '../persistence/fsAdapter'
 import { loadProjectMap, saveProjectMap } from '../persistence/projectMapStore'
 
@@ -35,6 +37,9 @@ interface ProjectStore {
    *  explicitly expanded by clicking them. Edges from these only show
    *  when they're in this set — NOT inferred from target visibility. */
   expandedHelperIds: Set<string>
+
+  /** V2: Active filter configuration */
+  filters: FilterState
 
   // ─── Undo/Redo ───
   undo: () => void
@@ -65,6 +70,30 @@ interface ProjectStore {
 
   setViewport: (viewport: { x: number; y: number; zoom: number }) => void
 
+  // V2: Filters
+  setFilters: (updates: Partial<FilterState>) => void
+  resetFilters: () => void
+
+  // V2: Tags & Pins
+  toggleNodePin: (nodeId: string) => void
+  addNodeTag: (nodeId: string, tag: string) => void
+  removeNodeTag: (nodeId: string, tag: string) => void
+
+  // V2: User Groups
+  addUserGroup: (group: UserGroup) => void
+  removeUserGroup: (groupId: string) => void
+  updateUserGroup: (groupId: string, updates: Partial<UserGroup>) => void
+  addNodeToGroup: (nodeId: string, groupId: string) => void
+  removeNodeFromGroup: (nodeId: string, groupId: string) => void
+
+  // V2: Edge suppression
+  suppressEdge: (edgeId: string) => void
+  restoreEdge: (edgeId: string) => void
+
+  // V2: Computed
+  getFilteredVisibleNodeIds: () => Set<string>
+  getAllTags: () => string[]
+
   save: () => void
 
   getAllNodes: () => Record<string, ProjectNode | ManualNode>
@@ -92,6 +121,8 @@ interface Snapshot {
   manualNodes: Record<string, ManualNode>
   manualEdges: Record<string, ManualEdge>
   childOrder: Record<string, string[]>
+  userGroups: Record<string, UserGroup>
+  suppressedEdges: string[]
 }
 
 const MAX_UNDO = 50
@@ -106,6 +137,8 @@ function takeSnapshot(state: ProjectStore): Snapshot {
     manualNodes: JSON.parse(JSON.stringify(state.user.manualNodes)),
     manualEdges: JSON.parse(JSON.stringify(state.user.manualEdges)),
     childOrder: JSON.parse(JSON.stringify(state.user.childOrder ?? {})),
+    userGroups: JSON.parse(JSON.stringify(state.user.userGroups ?? {})),
+    suppressedEdges: [...(state.user.suppressedEdges ?? [])],
   }
 }
 
@@ -129,6 +162,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   draftNodeId: null,
   structureVersion: 0,
   expandedHelperIds: new Set<string>(),
+  filters: { ...DEFAULT_FILTERS },
   canUndo: false,
   canRedo: false,
 
@@ -148,6 +182,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         manualNodes: snapshot.manualNodes,
         manualEdges: snapshot.manualEdges,
         childOrder: snapshot.childOrder,
+        userGroups: snapshot.userGroups,
+        suppressedEdges: snapshot.suppressedEdges,
       },
       structureVersion: s.structureVersion + 1,
       canUndo: undoStack.length > 0,
@@ -172,6 +208,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         manualNodes: snapshot.manualNodes,
         manualEdges: snapshot.manualEdges,
         childOrder: snapshot.childOrder,
+        userGroups: snapshot.userGroups,
+        suppressedEdges: snapshot.suppressedEdges,
       },
       structureVersion: s.structureVersion + 1,
       canUndo: true,
@@ -198,6 +236,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       user: data.user,
       visibleNodeIds: visibleIds,
       selectedNodeId: data.user.uiState.selectedNodeId,
+      filters: data.user.uiState.filters ?? { ...DEFAULT_FILTERS },
       structureVersion: s.structureVersion + 1,
     }))
   },
@@ -416,6 +455,260 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ user: { ...state.user, uiState: { ...state.user.uiState, viewport } } })
   },
 
+  // ─── V2: Filters ───
+
+  setFilters: (updates) => {
+    set((s) => ({
+      filters: { ...s.filters, ...updates },
+      structureVersion: s.structureVersion + 1,
+    }))
+    debouncedSave(get())
+  },
+
+  resetFilters: () => {
+    set((s) => ({
+      filters: { ...DEFAULT_FILTERS },
+      structureVersion: s.structureVersion + 1,
+    }))
+    debouncedSave(get())
+  },
+
+  // ─── V2: Tags & Pins ───
+
+  toggleNodePin: (nodeId) => {
+    const state = get()
+    const existing = state.user.nodeOverrides[nodeId] ?? {}
+    set({
+      user: {
+        ...state.user,
+        nodeOverrides: {
+          ...state.user.nodeOverrides,
+          [nodeId]: { ...existing, pinned: !existing.pinned },
+        },
+      },
+    })
+    debouncedSave(get())
+  },
+
+  addNodeTag: (nodeId, tag) => {
+    const state = get()
+    const existing = state.user.nodeOverrides[nodeId] ?? {}
+    const currentTags = existing.tags ?? []
+    if (currentTags.includes(tag)) return
+    set({
+      user: {
+        ...state.user,
+        nodeOverrides: {
+          ...state.user.nodeOverrides,
+          [nodeId]: { ...existing, tags: [...currentTags, tag] },
+        },
+      },
+    })
+    debouncedSave(get())
+  },
+
+  removeNodeTag: (nodeId, tag) => {
+    const state = get()
+    const existing = state.user.nodeOverrides[nodeId] ?? {}
+    const currentTags = existing.tags ?? []
+    set({
+      user: {
+        ...state.user,
+        nodeOverrides: {
+          ...state.user.nodeOverrides,
+          [nodeId]: { ...existing, tags: currentTags.filter((t) => t !== tag) },
+        },
+      },
+    })
+    debouncedSave(get())
+  },
+
+  // ─── V2: User Groups ───
+
+  addUserGroup: (group) => {
+    const state = get()
+    pushUndo(state)
+    // Also create a ManualNode so it renders on canvas
+    const groupNode: ManualNode = {
+      id: group.id,
+      type: 'user_group',
+      name: group.name,
+      description: group.description,
+      color: group.color,
+    }
+    set((s) => ({
+      user: {
+        ...state.user,
+        userGroups: { ...state.user.userGroups, [group.id]: group },
+        manualNodes: { ...state.user.manualNodes, [group.id]: groupNode },
+      },
+      structureVersion: s.structureVersion + 1,
+      canUndo: true,
+      canRedo: false,
+    }))
+    debouncedSave(get())
+  },
+
+  removeUserGroup: (groupId) => {
+    const state = get()
+    pushUndo(state)
+    const { [groupId]: _, ...restGroups } = state.user.userGroups
+    const { [groupId]: __, ...restNodes } = state.user.manualNodes
+    set((s) => ({
+      user: {
+        ...state.user,
+        userGroups: restGroups,
+        manualNodes: restNodes,
+      },
+      structureVersion: s.structureVersion + 1,
+      canUndo: true,
+      canRedo: false,
+    }))
+    debouncedSave(get())
+  },
+
+  updateUserGroup: (groupId, updates) => {
+    const state = get()
+    const existing = state.user.userGroups[groupId]
+    if (!existing) return
+    const updated = { ...existing, ...updates }
+    // Also update the ManualNode
+    const existingNode = state.user.manualNodes[groupId]
+    const updatedNode = existingNode
+      ? { ...existingNode, name: updated.name, description: updated.description, color: updated.color }
+      : undefined
+    set((s) => ({
+      user: {
+        ...state.user,
+        userGroups: { ...state.user.userGroups, [groupId]: updated },
+        ...(updatedNode ? { manualNodes: { ...state.user.manualNodes, [groupId]: updatedNode } } : {}),
+      },
+      structureVersion: s.structureVersion + 1,
+    }))
+    debouncedSave(get())
+  },
+
+  addNodeToGroup: (nodeId, groupId) => {
+    const state = get()
+    const group = state.user.userGroups[groupId]
+    if (!group || group.memberNodeIds.includes(nodeId)) return
+    pushUndo(state)
+    set((s) => ({
+      user: {
+        ...state.user,
+        userGroups: {
+          ...state.user.userGroups,
+          [groupId]: { ...group, memberNodeIds: [...group.memberNodeIds, nodeId] },
+        },
+      },
+      structureVersion: s.structureVersion + 1,
+      canUndo: true,
+      canRedo: false,
+    }))
+    debouncedSave(get())
+  },
+
+  removeNodeFromGroup: (nodeId, groupId) => {
+    const state = get()
+    const group = state.user.userGroups[groupId]
+    if (!group) return
+    pushUndo(state)
+    set((s) => ({
+      user: {
+        ...state.user,
+        userGroups: {
+          ...state.user.userGroups,
+          [groupId]: { ...group, memberNodeIds: group.memberNodeIds.filter((id) => id !== nodeId) },
+        },
+      },
+      structureVersion: s.structureVersion + 1,
+      canUndo: true,
+      canRedo: false,
+    }))
+    debouncedSave(get())
+  },
+
+  // ─── V2: Computed ───
+
+  getFilteredVisibleNodeIds: () => {
+    const state = get()
+    const { filters } = state
+    const allNodes = state.getAllNodes()
+    const result = new Set<string>()
+    const helperTypes = new Set(['hidden_connections_group', 'package_group', 'config_group'])
+
+    for (const id of state.visibleNodeIds) {
+      const node = allNodes[id]
+      if (!node) continue
+
+      if (!filters.showFiles && node.type === 'file') continue
+      if (!filters.showFolders && node.type === 'folder') continue
+      if (!filters.showNotes && node.type === 'note') continue
+      if (filters.hideHelperNodes && helperTypes.has(node.type)) continue
+      if (filters.hidePackageNodes && node.type === 'package') continue
+
+      if (filters.showPinnedOnly) {
+        const override = state.user.nodeOverrides[id]
+        if (!override?.pinned) continue
+      }
+
+      if (filters.filterTags.length > 0) {
+        const override = state.user.nodeOverrides[id]
+        const nodeTags = override?.tags ?? []
+        if (!filters.filterTags.some((t) => nodeTags.includes(t))) continue
+      }
+
+      result.add(id)
+    }
+
+    return result
+  },
+
+  getAllTags: () => {
+    const state = get()
+    const tagSet = new Set<string>()
+    for (const override of Object.values(state.user.nodeOverrides)) {
+      if (override.tags) {
+        for (const tag of override.tags) tagSet.add(tag)
+      }
+    }
+    return Array.from(tagSet).sort()
+  },
+
+  // ─── V2: Edge suppression ───
+
+  suppressEdge: (edgeId) => {
+    const state = get()
+    if (state.user.suppressedEdges.includes(edgeId)) return
+    pushUndo(state)
+    set((s) => ({
+      user: {
+        ...s.user,
+        suppressedEdges: [...s.user.suppressedEdges, edgeId],
+      },
+      structureVersion: s.structureVersion + 1,
+      canUndo: true,
+      canRedo: false,
+    }))
+    debouncedSave(get())
+  },
+
+  restoreEdge: (edgeId) => {
+    const state = get()
+    if (!state.user.suppressedEdges.includes(edgeId)) return
+    pushUndo(state)
+    set((s) => ({
+      user: {
+        ...s.user,
+        suppressedEdges: s.user.suppressedEdges.filter((id) => id !== edgeId),
+      },
+      structureVersion: s.structureVersion + 1,
+      canUndo: true,
+      canRedo: false,
+    }))
+    debouncedSave(get())
+  },
+
   save: () => {
     const state = get()
     if (!state.isProjectOpen || !state.projectName) return
@@ -428,6 +721,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           ...state.user.uiState,
           selectedNodeId: state.selectedNodeId,
           visibleNodeIds: Array.from(state.visibleNodeIds),
+          filters: state.filters,
         },
       },
     }

@@ -1,12 +1,14 @@
 import type { FsAdapter } from '../persistence/fsAdapter'
-import type { ProjectNode, ProjectEdge } from '../types'
+import type { ProjectNode, ProjectEdge, AliasConfig } from '../types'
 import { isParseable, makeNodeId, makeEdgeId, resolveImportPath } from './helpers'
 import { parseImports, extractPackageName } from './importParser'
+import { loadAliasConfig, resolveAliasImport } from './aliasResolver'
 
 interface RelationshipScanResult {
   nodes: Record<string, ProjectNode>
   edges: Record<string, ProjectEdge>
   warnings: string[]
+  aliasConfig: AliasConfig | null
 }
 
 /**
@@ -14,6 +16,7 @@ interface RelationshipScanResult {
  *
  * For parseable files (.js/.jsx/.ts/.tsx), extracts imports to build:
  * - `imports` edges for local file-to-file dependencies
+ * - `alias_import` edges for alias-resolved imports (tsconfig paths)
  * - `package_group` + `package` nodes with `groups` edges
  * - `hidden_connections_group` for distant cross-file imports
  */
@@ -25,6 +28,9 @@ export async function relationshipScan(
   const nodes: Record<string, ProjectNode> = {}
   const edges: Record<string, ProjectEdge> = {}
   const warnings: string[] = []
+
+  // Load alias config from tsconfig.json / jsconfig.json
+  const aliasConfig = await loadAliasConfig(adapter)
 
   // Build a lookup: path -> nodeId for resolving imports
   const pathToNodeId = new Map<string, string>()
@@ -89,9 +95,37 @@ export async function relationshipScan(
           )
         }
       } else {
-        // Package import
-        const pkgName = extractPackageName(imp.specifier)
-        packageNames.push(pkgName)
+        // Try alias resolution before treating as package
+        let resolvedAsAlias = false
+        if (aliasConfig) {
+          const aliasResolved = await resolveAliasImport(
+            imp.specifier,
+            aliasConfig,
+            fileExistsCheck,
+          )
+          if (aliasResolved) {
+            const targetNodeId = pathToNodeId.get(aliasResolved)
+            if (targetNodeId) {
+              localImportTargets.push(targetNodeId)
+              const edgeId = makeEdgeId(fileNode.id, targetNodeId, 'alias_import')
+              if (!existingEdges[edgeId] && !edges[edgeId]) {
+                edges[edgeId] = {
+                  id: edgeId,
+                  type: 'alias_import',
+                  source: fileNode.id,
+                  target: targetNodeId,
+                }
+              }
+              resolvedAsAlias = true
+            }
+          }
+        }
+
+        if (!resolvedAsAlias) {
+          // Package import
+          const pkgName = extractPackageName(imp.specifier)
+          packageNames.push(pkgName)
+        }
       }
     }
 
@@ -186,5 +220,5 @@ export async function relationshipScan(
   // Merge package nodes into the result
   Object.assign(nodes, packageNodes)
 
-  return { nodes, edges, warnings }
+  return { nodes, edges, warnings, aliasConfig }
 }

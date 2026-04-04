@@ -69,6 +69,7 @@ export function ProjectSettingsModal({ onClose }: ProjectSettingsModalProps) {
               </div>
             </div>
           </div>
+
         </div>
 
         {/* Warnings */}

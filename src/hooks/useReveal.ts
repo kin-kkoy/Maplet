@@ -20,7 +20,8 @@ export function useReveal() {
 
     state.pushUndoSnapshot()
 
-    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges)
+    const suppressedSet = new Set(state.user.suppressedEdges ?? [])
+    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges, suppressedSet)
     const toHide = candidates.filter((id) => state.visibleNodeIds.has(id))
     if (toHide.length > 0) {
       state.hideNodes(toHide)
@@ -47,7 +48,8 @@ export function useReveal() {
 
       state.pushUndoSnapshot()
 
-      const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges)
+      const suppressedSet = new Set(state.user.suppressedEdges ?? [])
+    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges, suppressedSet)
       const newNodes = candidates.filter((id) => !visibleNodeIds.has(id))
 
       if (newNodes.length > 0) {
@@ -70,24 +72,43 @@ export function useReveal() {
     }
 
     // Structural nodes: standard expand
-    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges)
+    const suppressedSet = new Set(state.user.suppressedEdges ?? [])
+    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges, suppressedSet)
     const newNodes = candidates.filter((id) => !visibleNodeIds.has(id))
     if (newNodes.length === 0) return
 
     state.pushUndoSnapshot()
 
-    const savedOrder = state.user.childOrder?.[nodeId]
-    if (savedOrder) {
-      const orderMap = new Map(savedOrder.map((id, i) => [id, i]))
-      newNodes.sort((a, b) => (orderMap.get(a) ?? 999) - (orderMap.get(b) ?? 999))
-    }
-
-    const parentPos = nodeOverrides[nodeId]?.position ?? { x: 0, y: 0 }
+    // Build typeMap first (needed for both sorting and layout)
     const typeMap = new Map<string, string>()
     for (const id of newNodes) {
       const n = allNodes[id]
       if (n) typeMap.set(id, n.type)
     }
+
+    const savedOrder = state.user.childOrder?.[nodeId]
+    if (savedOrder) {
+      const orderMap = new Map(savedOrder.map((id, i) => [id, i]))
+      newNodes.sort((a, b) => (orderMap.get(a) ?? 999) - (orderMap.get(b) ?? 999))
+    } else {
+      // Default ordering: folders first, then user_groups, then files, then notes
+      const TYPE_PRIORITY: Record<string, number> = {
+        folder: 0,
+        user_group: 1,
+        file: 2,
+        note: 3,
+      }
+      newNodes.sort((a, b) => {
+        const pa = TYPE_PRIORITY[typeMap.get(a) ?? ''] ?? 4
+        const pb = TYPE_PRIORITY[typeMap.get(b) ?? ''] ?? 4
+        if (pa !== pb) return pa - pb
+        const na = (allNodes[a] as any)?.name ?? ''
+        const nb = (allNodes[b] as any)?.name ?? ''
+        return na.localeCompare(nb)
+      })
+    }
+
+    const parentPos = nodeOverrides[nodeId]?.position ?? { x: 0, y: 0 }
 
     // Position children: use saved relative offsets from parent if available,
     // otherwise calculate fresh positions
@@ -127,21 +148,23 @@ export function useReveal() {
     }).length
     const expandedVisible = new Set([...visibleNodeIds, ...newNodes])
     const adjustments = adjustSiblingPositions(
-      nodeId, regularNewCount, allNodes, expandedVisible, posMap,
+      nodeId, regularNewCount, allNodes, expandedVisible, posMap, allEdges,
     )
     for (const adj of adjustments) {
       state.setNodeOverride(adj.nodeId, { position: { x: adj.x, y: adj.y } })
     }
 
-    // Resolve collisions between new children and unrelated nodes
+    // Resolve collisions between new children and ALL other visible nodes
     const collisionOverrides = useProjectStore.getState().user.nodeOverrides
     const collisionPosMap: Record<string, { x: number; y: number } | undefined> = {}
     for (const [id, ov] of Object.entries(collisionOverrides)) collisionPosMap[id] = ov?.position
+    const batchAdjusted = new Set<string>()
     for (const childId of newNodes) {
-      const fixes = resolveCollisions(childId, allNodes, expandedVisible, collisionPosMap)
+      const fixes = resolveCollisions(childId, allNodes, expandedVisible, collisionPosMap, allEdges, batchAdjusted)
       for (const fix of fixes) {
         state.setNodeOverride(fix.nodeId, { position: { x: fix.x, y: fix.y } })
         collisionPosMap[fix.nodeId] = { x: fix.x, y: fix.y }
+        batchAdjusted.add(fix.nodeId)
       }
     }
 
@@ -166,7 +189,8 @@ export function useReveal() {
 
       state.pushUndoSnapshot()
 
-      const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges)
+      const suppressedSet = new Set(state.user.suppressedEdges ?? [])
+    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges, suppressedSet)
 
       // For each target: if its real parent folder is not expanded,
       // expand the real parent so the node "goes back" to where it belongs
@@ -228,7 +252,8 @@ export function useReveal() {
         const rManualEdges = rState.user.manualEdges
         const rNode = rAllNodes[pid]
         if (!rNode) continue
-        const pCandidates = getRevealCandidates(pid, rNode.type, rAllNodes, rAllEdges, rManualEdges)
+        const rSuppressed = new Set(rState.user.suppressedEdges ?? [])
+        const pCandidates = getRevealCandidates(pid, rNode.type, rAllNodes, rAllEdges, rManualEdges, rSuppressed)
 
         // ALL children get positioned (both new and already-visible ones that need repositioning)
         const pPos = rState.user.nodeOverrides[pid]?.position ?? { x: 0, y: 0 }
@@ -255,7 +280,8 @@ export function useReveal() {
     }
 
     // Structural nodes: standard collapse
-    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges)
+    const suppressedSet = new Set(state.user.suppressedEdges ?? [])
+    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges, suppressedSet)
     const visibleChildren = candidates.filter((id) => visibleNodeIds.has(id))
     if (visibleChildren.length === 0) return
 
@@ -275,7 +301,7 @@ export function useReveal() {
       const posMap: Record<string, { x: number; y: number } | undefined> = {}
       for (const [id, ov] of Object.entries(nodeOverrides)) posMap[id] = ov?.position
       const newVisible = new Set([...visibleNodeIds].filter((id) => !toHide.includes(id)))
-      const adjustments = adjustSiblingPositions(nodeId, 0, allNodes, newVisible, posMap)
+      const adjustments = adjustSiblingPositions(nodeId, 0, allNodes, newVisible, posMap, allEdges)
       for (const adj of adjustments) {
         state.setNodeOverride(adj.nodeId, { position: { x: adj.x, y: adj.y } })
       }
@@ -296,7 +322,8 @@ export function useReveal() {
     // Structural nodes: check if any children are visible
     const allEdges = state.getAllEdges()
     const manualEdges = state.user.manualEdges
-    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges)
+    const suppressedSet = new Set(state.user.suppressedEdges ?? [])
+    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges, suppressedSet)
     return candidates.some((id) => state.visibleNodeIds.has(id))
   }, [])
 
@@ -307,7 +334,8 @@ export function useReveal() {
     const manualEdges = state.user.manualEdges
     const node = allNodes[nodeId]
     if (!node) return false
-    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges)
+    const suppressedSet = new Set(state.user.suppressedEdges ?? [])
+    const candidates = getRevealCandidates(nodeId, node.type, allNodes, allEdges, manualEdges, suppressedSet)
     return candidates.length > 0
   }, [])
 
@@ -320,15 +348,37 @@ function getRevealCandidates(
   allNodes: Record<string, { id: string; type: string; parentId?: string | null; ownerId?: string }>,
   allEdges: Record<string, { id: string; type: string; source: string; target: string }>,
   manualEdgesOnly: Record<string, { source: string; target: string }>,
+  suppressedEdges?: Set<string>,
 ): string[] {
   const candidates: string[] = []
+  const suppressed = suppressedEdges ?? new Set<string>()
+
+  // Helper: collect user_group nodes connected FROM this node (this node → group)
+  const collectGroupChildren = () => {
+    for (const edge of Object.values(manualEdgesOnly)) {
+      if (edge.source === nodeId) {
+        const target = allNodes[edge.target]
+        if (target?.type === 'user_group') candidates.push(target.id)
+      }
+    }
+  }
+
+  // Helper: collect structural children, excluding those whose contains edge is suppressed
+  const collectStructuralChildren = () => {
+    for (const n of Object.values(allNodes)) {
+      if (n.parentId !== nodeId) continue
+      // Check if the contains edge to this child is suppressed
+      const containsEdgeId = `edge:${nodeId}->${n.id}:contains`
+      if (suppressed.has(containsEdgeId)) continue
+      candidates.push(n.id)
+    }
+  }
 
   switch (nodeType) {
     case 'project':
     case 'folder': {
-      for (const n of Object.values(allNodes)) {
-        if (n.parentId === nodeId) candidates.push(n.id)
-      }
+      collectStructuralChildren()
+      collectGroupChildren()
       break
     }
 
@@ -348,9 +398,8 @@ function getRevealCandidates(
           if (other?.type === 'note') candidates.push(other.id)
         }
       }
-      for (const n of Object.values(allNodes)) {
-        if (n.parentId === nodeId) candidates.push(n.id)
-      }
+      collectStructuralChildren()
+      collectGroupChildren()
       break
     }
 
@@ -369,8 +418,27 @@ function getRevealCandidates(
 
     case 'hidden_connections_group': {
       for (const edge of Object.values(allEdges)) {
-        if (edge.source === nodeId && edge.type === 'imports') {
+        if (edge.source === nodeId && (edge.type === 'imports' || edge.type === 'alias_import')) {
           candidates.push(edge.target)
+        }
+      }
+      break
+    }
+
+    case 'user_group': {
+      // Reveal nodes connected FROM this group (group → target via manual_link)
+      for (const edge of Object.values(manualEdgesOnly)) {
+        if (edge.source === nodeId) {
+          const target = allNodes[edge.target]
+          if (target && target.type !== 'user_group') candidates.push(target.id)
+        }
+      }
+      // Also include group membership
+      const state = useProjectStore.getState()
+      const group = state.user.userGroups[nodeId]
+      if (group) {
+        for (const memberId of group.memberNodeIds) {
+          if (allNodes[memberId]) candidates.push(memberId)
         }
       }
       break
@@ -413,10 +481,40 @@ function collectDescendants(
     }
 
     for (const edge of Object.values(allEdges)) {
-      if (edge.source === current && (edge.type === 'groups' || edge.type === 'imports')) {
+      if (edge.source === current && (edge.type === 'groups' || edge.type === 'imports' || edge.type === 'alias_import')) {
         if (visibleNodeIds.has(edge.target) && edge.target !== nodeId) {
           toHide.push(edge.target)
           queue.push(edge.target)
+        }
+      }
+      // Follow manual_link edges FROM user_group nodes (group → child)
+      if (edge.source === current && edge.type === 'manual_link') {
+        const currentNode = allNodes[current]
+        if (currentNode?.type === 'user_group' && visibleNodeIds.has(edge.target) && edge.target !== nodeId) {
+          toHide.push(edge.target)
+          queue.push(edge.target)
+        }
+      }
+      // Follow manual_link edges TO user_group nodes (parent → group)
+      if (edge.source === current && edge.type === 'manual_link') {
+        const target = allNodes[edge.target]
+        if (target?.type === 'user_group' && visibleNodeIds.has(edge.target) && edge.target !== nodeId && !visited.has(edge.target)) {
+          toHide.push(edge.target)
+          queue.push(edge.target)
+        }
+      }
+    }
+
+    // Also traverse user_group memberNodeIds from the store
+    const currentNode = allNodes[current]
+    if (currentNode?.type === 'user_group') {
+      const grp = useProjectStore.getState().user.userGroups[current]
+      if (grp) {
+        for (const memberId of grp.memberNodeIds) {
+          if (allNodes[memberId] && visibleNodeIds.has(memberId) && memberId !== nodeId && !visited.has(memberId)) {
+            toHide.push(memberId)
+            queue.push(memberId)
+          }
         }
       }
     }

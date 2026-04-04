@@ -11,4 +11,5 @@ export const nodeTypes = {
   package: BaseNode,
   hidden_connections_group: BaseNode,
   config_group: BaseNode,
+  user_group: BaseNode,
 } as const

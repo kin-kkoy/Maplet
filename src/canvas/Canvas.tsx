@@ -16,7 +16,7 @@ import { consumeLongPressFired } from './nodeTypes/BaseNode'
 import { edgeTypes } from './edgeTypes'
 import { useProjectStore } from '../store/useProjectStore'
 import { useReveal } from '../hooks/useReveal'
-import { resolveCollisions } from './layout'
+import { resolveCollisions, calculateChildPositions } from './layout'
 import { Dock } from '../dock/Dock'
 import { DetailCard } from '../detailCard/DetailCard'
 import { AddNodeModal } from '../modals/AddNodeModal'
@@ -24,6 +24,8 @@ import { ConnectModeOverlay } from '../modals/ConnectMode'
 import { SearchOverlay } from '../search/SearchOverlay'
 import { ProjectSettingsModal } from '../modals/ProjectSettingsModal'
 import { ShortcutsPanel } from '../modals/ShortcutsPanel'
+import { FilterPanel } from '../filters/FilterPanel'
+import { GroupModal } from '../modals/GroupModal'
 import { ScanLine } from 'lucide-react'
 import type { ManualEdge, ProjectNode, ManualNode, ProjectEdge } from '../types'
 
@@ -82,6 +84,7 @@ const NODE_TYPE_ACCENT: Record<string, string> = {
   package: 'var(--accent-package)',
   hidden_connections_group: 'var(--accent-hidden)',
   config_group: 'var(--accent-hidden)',
+  user_group: 'var(--accent-user-group)',
 }
 
 interface OpenCard {
@@ -99,7 +102,7 @@ const HELPER_TYPES = new Set(['hidden_connections_group', 'package_group', 'conf
 function buildFlowNodes(
   scannedNodes: Record<string, ProjectNode>,
   manualNodes: Record<string, ManualNode>,
-  nodeOverrides: Record<string, { position?: { x: number; y: number }; alias?: string }>,
+  nodeOverrides: Record<string, { position?: { x: number; y: number }; alias?: string; pinned?: boolean; tags?: string[] }>,
   visibleNodeIds: Set<string>,
   selectedNodeId: string | null,
   childOrder: Record<string, string[]>,
@@ -141,10 +144,43 @@ function buildFlowNodes(
     if ('parentId' in n && n.parentId) nodesWithChildren.add(n.parentId)
     if ('ownerId' in n && n.ownerId) nodesWithChildren.add(n.ownerId)
   }
-  // Also check edges for hidden_connections_group targets
+  // Also check edges for expandable children.
+  // 'groups' edges always indicate children (package_group→package, file→helper).
+  // 'imports'/'alias_import' edges only indicate children when the source is a
+  // helper node (hidden_connections_group), NOT when source is a regular file.
+  // 'manual_link' from user_group indicates the group has children.
+  // 'manual_link' TO a user_group indicates the source has the group as a child.
   for (const edge of Object.values(allEdges)) {
-    if (edge.type === 'groups' || edge.type === 'imports') {
+    if (edge.type === 'groups') {
       nodesWithChildren.add(edge.source)
+    } else if (edge.type === 'imports' || edge.type === 'alias_import') {
+      const srcType = allNodes[edge.source]?.type
+      if (srcType && HELPER_TYPES.has(srcType)) {
+        nodesWithChildren.add(edge.source)
+      }
+    } else if (edge.type === 'manual_link') {
+      const srcNode = allNodes[edge.source]
+      const tgtNode = allNodes[edge.target]
+      // user_group → child: group has children
+      if (srcNode?.type === 'user_group') {
+        nodesWithChildren.add(edge.source)
+      }
+      // parent → user_group: parent has the group as a child
+      if (tgtNode?.type === 'user_group') {
+        nodesWithChildren.add(edge.source)
+      }
+    }
+  }
+
+  // Pre-compute which user_group nodes are "virtual children" of which parent
+  // (connected via manual_link: parent → user_group)
+  const groupParentMap = new Map<string, string>() // groupId → parentId
+  for (const edge of Object.values(allEdges)) {
+    if (edge.type === 'manual_link') {
+      const tgt = allNodes[edge.target]
+      if (tgt?.type === 'user_group') {
+        groupParentMap.set(edge.target, edge.source)
+      }
     }
   }
 
@@ -156,21 +192,36 @@ function buildFlowNodes(
     if (n && 'parentId' in n && n.parentId && visibleNodeIds.has(n.parentId)) {
       parentIds.add(n.parentId)
     }
+    // user_group virtual children
+    const gp = groupParentMap.get(id)
+    if (gp && visibleNodeIds.has(gp)) {
+      parentIds.add(gp)
+    }
   }
   for (const pid of parentIds) {
     const order = childOrder?.[pid]
     if (order) {
       siblingOrderByParent.set(pid, order.filter((id) => visibleNodeIds.has(id)))
     } else {
-      const children = Object.values(allNodes)
-        .filter((n) => 'parentId' in n && n.parentId === pid && visibleNodeIds.has(n.id))
-        .sort((a, b) => {
-          const ay = nodeOverrides[a.id]?.position?.y ?? 0
-          const by = nodeOverrides[b.id]?.position?.y ?? 0
-          return ay - by
-        })
-        .map((n) => n.id)
-      siblingOrderByParent.set(pid, children)
+      // Collect structural children + virtual group children
+      const childrenIds: string[] = []
+      for (const n of Object.values(allNodes)) {
+        if ('parentId' in n && n.parentId === pid && visibleNodeIds.has(n.id)) {
+          childrenIds.push(n.id)
+        }
+      }
+      // Add user_groups connected from this parent
+      for (const [gid, gpid] of groupParentMap) {
+        if (gpid === pid && visibleNodeIds.has(gid) && !childrenIds.includes(gid)) {
+          childrenIds.push(gid)
+        }
+      }
+      childrenIds.sort((a, b) => {
+        const ay = nodeOverrides[a]?.position?.y ?? 0
+        const by = nodeOverrides[b]?.position?.y ?? 0
+        return ay - by
+      })
+      siblingOrderByParent.set(pid, childrenIds)
     }
   }
 
@@ -180,13 +231,15 @@ function buildFlowNodes(
     if (!node) continue
     const ov = nodeOverrides[id]
     const parentId = 'parentId' in node ? node.parentId : null
+    // For user_group nodes, use virtual parent from manual_link
+    const effectiveParentId = parentId ?? groupParentMap.get(id) ?? null
 
     // Compute reorder info for this node
     let hasSiblings = false
     let canMoveUp = false
     let canMoveDown = false
-    if (parentId) {
-      const siblings = siblingOrderByParent.get(parentId)
+    if (effectiveParentId) {
+      const siblings = siblingOrderByParent.get(effectiveParentId)
       if (siblings && siblings.length >= 2) {
         const idx = siblings.indexOf(id)
         if (idx !== -1) {
@@ -208,10 +261,12 @@ function buildFlowNodes(
         isExpanded: expandedIds.has(node.id),
         accentColor: NODE_TYPE_ACCENT[node.type] ?? 'var(--accent-primary)',
         hasChildren: nodesWithChildren.has(node.id),
-        parentId,
+        parentId: effectiveParentId,
         hasSiblings,
         canMoveUp,
         canMoveDown,
+        isPinned: nodeOverrides[id]?.pinned ?? false,
+        tags: nodeOverrides[id]?.tags ?? [],
       },
       selected: node.id === selectedNodeId,
     })
@@ -271,10 +326,14 @@ function buildFlowEdges(
   nodePositions: Record<string, { x: number; y: number } | undefined>,
   expandedIds: Set<string>,
   allNodeTypes: Record<string, string>,
+  userGroups?: Record<string, { id: string; memberNodeIds: string[] }>,
+  suppressedEdges?: string[],
 ): Edge[] {
+  const suppressedSet = new Set(suppressedEdges ?? [])
   const result: Edge[] = []
   const allEdges = { ...scannedEdges, ...manualEdges }
   for (const edge of Object.values(allEdges)) {
+    if (suppressedSet.has(edge.id)) continue
     if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) continue
 
     // Hide edges FROM helper nodes when the helper is collapsed
@@ -283,6 +342,7 @@ function buildFlowEdges(
       continue
     }
 
+    const isAlias = edge.type === 'alias_import'
     const isSolid =
       edge.type === 'contains' ||
       (edge.type === 'manual_link' && 'relation' in edge && edge.relation === 'Attached Note')
@@ -291,15 +351,43 @@ function buildFlowEdges(
     const targetPos = nodePositions[edge.target] ?? { x: 0, y: 0 }
     const targetHandle = pickTargetHandle(sourcePos, targetPos)
 
+    let edgeType: string
+    if (isSolid) edgeType = 'solidEdge'
+    else if (isAlias) edgeType = 'curvedDashedEdge'
+    else edgeType = 'dashedEdge'
+
     result.push({
       id: edge.id,
       source: edge.source,
       target: edge.target,
       sourceHandle: 'source-right',
       targetHandle,
-      type: isSolid ? 'solidEdge' : 'dashedEdge',
+      type: edgeType,
     })
   }
+
+  // Draw edges for expanded user groups to their members
+  if (userGroups) {
+    for (const group of Object.values(userGroups)) {
+      if (!visibleNodeIds.has(group.id)) continue
+      if (!expandedIds.has(group.id)) continue
+      for (const memberId of group.memberNodeIds) {
+        if (!visibleNodeIds.has(memberId)) continue
+        const sourcePos = nodePositions[group.id] ?? { x: 0, y: 0 }
+        const targetPos = nodePositions[memberId] ?? { x: 0, y: 0 }
+        const targetHandle = pickTargetHandle(sourcePos, targetPos)
+        result.push({
+          id: `groupedge:${group.id}->${memberId}`,
+          source: group.id,
+          target: memberId,
+          sourceHandle: 'source-right',
+          targetHandle,
+          type: 'dashedEdge',
+        })
+      }
+    }
+  }
+
   return result
 }
 
@@ -344,11 +432,12 @@ export function Canvas() {
     prevVersion.current = structureVersion
 
     const state = useProjectStore.getState()
+    const effectiveVisible = state.getFilteredVisibleNodeIds()
     const { nodes, expandedIds, nodeTypeMap } = buildFlowNodes(
       state.scanned.nodes,
       state.user.manualNodes,
       state.user.nodeOverrides,
-      state.visibleNodeIds,
+      effectiveVisible,
       state.selectedNodeId,
       state.user.childOrder,
       state.scanned.edges,
@@ -362,10 +451,12 @@ export function Canvas() {
     const edges = buildFlowEdges(
       state.scanned.edges,
       state.user.manualEdges,
-      state.visibleNodeIds,
+      effectiveVisible,
       posMap,
       expandedIds,
       nodeTypeMap,
+      state.user.userGroups,
+      state.user.suppressedEdges,
     )
     setFlowNodes(nodes)
     setFlowEdges(edges)
@@ -389,17 +480,18 @@ export function Canvas() {
 
   const rebuildEdges = useCallback(() => {
     const state = useProjectStore.getState()
+    const effectiveVisible = state.getFilteredVisibleNodeIds()
     const allN = { ...state.scanned.nodes, ...state.user.manualNodes }
     // Structural expanded: inferred from visible children
     const expandedSet = new Set<string>()
-    for (const id of state.visibleNodeIds) {
+    for (const id of effectiveVisible) {
       const n = allN[id]
       if (!n) continue
-      if ('parentId' in n && n.parentId && state.visibleNodeIds.has(n.parentId)) {
+      if ('parentId' in n && n.parentId && effectiveVisible.has(n.parentId)) {
         const p = allN[n.parentId]
         if (p && !HELPER_TYPES.has(p.type)) expandedSet.add(n.parentId)
       }
-      if ('ownerId' in n && n.ownerId && state.visibleNodeIds.has(n.ownerId)) {
+      if ('ownerId' in n && n.ownerId && effectiveVisible.has(n.ownerId)) {
         const o = allN[n.ownerId]
         if (o && !HELPER_TYPES.has(o.type)) expandedSet.add(n.ownerId)
       }
@@ -413,7 +505,7 @@ export function Canvas() {
     for (const [nid, ov] of Object.entries(state.user.nodeOverrides)) posMap[nid] = ov?.position
     setFlowEdges(buildFlowEdges(
       state.scanned.edges, state.user.manualEdges,
-      state.visibleNodeIds, posMap, expandedSet, typeMap,
+      effectiveVisible, posMap, expandedSet, typeMap, state.user.userGroups, state.user.suppressedEdges,
     ))
   }, [])
 
@@ -439,8 +531,22 @@ export function Canvas() {
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
+      // Sync data.isSelected with node.selected for any selection changes
+      const hasSelectionChange = changes.some((c) => c.type === 'select')
+
       setFlowNodes((prev) => {
         let updated = applyNodeChanges(changes, prev)
+
+        // Keep data.isSelected in sync with node.selected
+        if (hasSelectionChange) {
+          updated = updated.map((n) => {
+            const currentSel = !!(n.data as any)?.isSelected
+            if (n.selected !== currentSel) {
+              return { ...n, data: { ...n.data, isSelected: !!n.selected } }
+            }
+            return n
+          })
+        }
 
         // If Ctrl+dragging, move descendants along with the dragged node
         if (altDragRef.current) {
@@ -562,6 +668,7 @@ export function Canvas() {
               freshState.getAllNodes(),
               freshState.visibleNodeIds,
               posMap,
+              freshState.getAllEdges(),
             )
             for (const fix of fixes) {
               const fixNode = freshState.getNode(fix.nodeId)
@@ -653,15 +760,18 @@ export function Canvas() {
   const [showAddNode, setShowAddNode] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
+  const [showGroupModal, setShowGroupModal] = useState(false)
+  const [groupTargetNodeId, setGroupTargetNodeId] = useState<string | null>(null)
   const [connectMode, setConnectMode] = useState<{
     step: 'source' | 'target'
     sourceId?: string
     sourceName?: string
   } | null>(null)
 
+  // ─── Click: select node (+ connect mode). Expand/collapse handled by chevron. ───
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
-      // Skip expand/collapse if this click follows a long-press
       if (consumeLongPressFired()) return
 
       if (connectMode) {
@@ -692,22 +802,13 @@ export function Canvas() {
         }
       }
 
-      // Single click always toggles expand/collapse
-      if (checkExpanded(node.id)) {
-        if (_event.shiftKey) {
-          forceCollapseHelper(node.id)
-        } else {
-          collapse(node.id)
-        }
-        useProjectStore.getState().setSelectedNode(null)
-      } else {
-        expand(node.id)
-        useProjectStore.getState().setSelectedNode(node.id)
-      }
+      // Click on node body = select
+      useProjectStore.getState().setSelectedNode(node.id)
     },
-    [expand, collapse, checkExpanded, forceCollapseHelper, connectMode],
+    [connectMode],
   )
 
+  // ─── Double-click: open detail card + select ───
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
     (event, node) => {
       if (connectMode) return
@@ -715,9 +816,28 @@ export function Canvas() {
         if (prev.some((c) => c.nodeId === node.id)) return prev
         return [...prev, { nodeId: node.id, x: event.clientX + 20, y: event.clientY - 20 }]
       })
+      useProjectStore.getState().setSelectedNode(node.id)
     },
     [connectMode],
   )
+
+  // ─── Chevron click: expand/collapse (dispatched from BaseNode) ───
+  useEffect(() => {
+    const onChevronClick = (e: Event) => {
+      const { nodeId, shiftKey } = (e as CustomEvent<{ nodeId: string; shiftKey: boolean }>).detail
+      if (checkExpanded(nodeId)) {
+        if (shiftKey) {
+          forceCollapseHelper(nodeId)
+        } else {
+          collapse(nodeId)
+        }
+      } else {
+        expand(nodeId)
+      }
+    }
+    window.addEventListener('node-chevron-click', onChevronClick)
+    return () => window.removeEventListener('node-chevron-click', onChevronClick)
+  }, [expand, collapse, checkExpanded, forceCollapseHelper])
 
   const handlePaneClick = useCallback(() => {
     useProjectStore.getState().setSelectedNode(null)
@@ -874,15 +994,136 @@ export function Canvas() {
         />
       )}
 
+      {showFilters && <FilterPanel onClose={() => setShowFilters(false)} />}
+
+      {showGroupModal && groupTargetNodeId && (
+        <GroupModal
+          onClose={() => { setShowGroupModal(false); setGroupTargetNodeId(null) }}
+          targetNodeId={groupTargetNodeId}
+        />
+      )}
+
       <Dock
         onSearchOpen={() => setShowSearch(true)}
         onAddNode={() => setShowAddNode(true)}
-        onConnectMode={() => setConnectMode(connectMode ? null : { step: 'source' })}
+        onConnectMode={() => {
+          if (connectMode) {
+            setConnectMode(null)
+          } else {
+            const selectedId = useProjectStore.getState().selectedNodeId
+            if (selectedId) {
+              const node = useProjectStore.getState().getNode(selectedId)
+              setConnectMode({
+                step: 'target',
+                sourceId: selectedId,
+                sourceName: String((node as any)?.name ?? selectedId),
+              })
+            } else {
+              setConnectMode({ step: 'source' })
+            }
+          }
+        }}
         onSettingsOpen={() => setShowSettings(true)}
         onDetailOpen={handleDetailOpen}
         onRevealPath={handleRevealPath}
         onShortcutsOpen={() => setShowShortcuts(true)}
+        onFilterToggle={() => setShowFilters(!showFilters)}
+        onAddToGroup={() => {
+          if (selectedNodeId) {
+            setGroupTargetNodeId(selectedNodeId)
+            setShowGroupModal(true)
+          }
+        }}
+        onToggleExpand={() => {
+          if (!selectedNodeId) return
+          if (checkExpanded(selectedNodeId)) {
+            collapse(selectedNodeId)
+          } else {
+            expand(selectedNodeId)
+          }
+        }}
+        onRebalance={() => {
+          if (!selectedNodeId) return
+          const state = useProjectStore.getState()
+          const allNodes = state.getAllNodes()
+          const { visibleNodeIds } = state
+
+          state.pushUndoSnapshot()
+
+          // Clear saved childOrder and relativePositions, then re-layout each expanded node's children
+          const queue = [selectedNodeId]
+          const visited = new Set<string>()
+          while (queue.length > 0) {
+            const parentId = queue.shift()!
+            if (visited.has(parentId)) continue
+            visited.add(parentId)
+
+            const parentPos = state.user.nodeOverrides[parentId]?.position ?? { x: 0, y: 0 }
+
+            // Find visible children of this node
+            const children: string[] = []
+            for (const n of Object.values(allNodes)) {
+              if ('parentId' in n && n.parentId === parentId && visibleNodeIds.has(n.id)) {
+                children.push(n.id)
+              }
+            }
+            // Also include user_group children via manual_link
+            const allEdges = state.getAllEdges()
+            for (const edge of Object.values(allEdges)) {
+              if (edge.type === 'manual_link' && edge.source === parentId) {
+                const tgt = allNodes[edge.target]
+                if (tgt?.type === 'user_group' && visibleNodeIds.has(tgt.id) && !children.includes(tgt.id)) {
+                  children.push(tgt.id)
+                }
+              }
+            }
+
+            if (children.length > 0) {
+              // Sort by type priority (same as initial expand)
+              const TYPE_PRIORITY: Record<string, number> = { folder: 0, user_group: 1, file: 2, note: 3 }
+              children.sort((a, b) => {
+                const pa = TYPE_PRIORITY[allNodes[a]?.type ?? ''] ?? 4
+                const pb = TYPE_PRIORITY[allNodes[b]?.type ?? ''] ?? 4
+                if (pa !== pb) return pa - pb
+                const na = (allNodes[a] as any)?.name ?? ''
+                const nb = (allNodes[b] as any)?.name ?? ''
+                return na.localeCompare(nb)
+              })
+
+              // Clear saved order and relative positions for these children
+              const newChildOrder = { ...state.user.childOrder }
+              delete newChildOrder[parentId]
+              useProjectStore.setState((s) => ({
+                user: { ...s.user, childOrder: newChildOrder },
+              }))
+
+              // Recalculate positions
+              const typeMap = new Map<string, string>()
+              for (const id of children) {
+                const n = allNodes[id]
+                if (n) typeMap.set(id, n.type)
+              }
+              const positions = calculateChildPositions(parentPos, children, typeMap)
+              for (const pos of positions) {
+                state.setNodeOverride(pos.nodeId, {
+                  position: { x: pos.x, y: pos.y },
+                  relativePosition: { x: pos.x - parentPos.x, y: pos.y - parentPos.y },
+                })
+              }
+
+              // Queue children for recursive rebalance
+              for (const id of children) {
+                queue.push(id)
+              }
+            }
+          }
+
+          // Bump structure version to trigger re-render
+          useProjectStore.setState((s) => ({ structureVersion: s.structureVersion + 1 }))
+        }}
+        isNodeExpanded={selectedNodeId ? checkExpanded(selectedNodeId) : false}
         isConnecting={!!connectMode}
+        isFilterOpen={showFilters}
       />
     </div>
   )

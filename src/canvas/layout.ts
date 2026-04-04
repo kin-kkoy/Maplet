@@ -3,8 +3,10 @@
  */
 
 const H_GAP = 280
-const V_GAP = 70
-const NODE_HEIGHT = 52
+const V_VISUAL_GAP = 20       // uniform visual gap between node edges
+const NODE_HEIGHT_FOLDER = 74  // folder tab (12) + body (~60) incl border-box
+const NODE_HEIGHT_FILE = 56    // file body incl padding/border
+const NODE_HEIGHT_DEFAULT = 58 // fallback for other node types
 const HELPER_H_OFFSET = 200
 const HELPER_V_OFFSET_PKG = 40
 const HELPER_V_OFFSET_HCG = -40
@@ -13,6 +15,12 @@ export interface LayoutPosition {
   nodeId: string
   x: number
   y: number
+}
+
+function nodeHeight(type?: string): number {
+  if (type === 'folder') return NODE_HEIGHT_FOLDER
+  if (type === 'file') return NODE_HEIGHT_FILE
+  return NODE_HEIGHT_DEFAULT
 }
 
 /**
@@ -39,15 +47,21 @@ export function calculateChildPositions(
 
   const count = regularChildren.length
   if (count > 0) {
-    const totalHeight = (count - 1) * V_GAP
-    const startY = parentPosition.y - totalHeight / 2
+    // Total height = sum of all node heights + gaps between them
+    let totalHeight = 0
+    for (const id of regularChildren) {
+      totalHeight += nodeHeight(nodeTypeMap.get(id))
+    }
+    totalHeight += (count - 1) * V_VISUAL_GAP
+    let currentY = parentPosition.y - totalHeight / 2
 
     for (let i = 0; i < count; i++) {
       results.push({
         nodeId: regularChildren[i]!,
         x: parentPosition.x + H_GAP,
-        y: startY + i * V_GAP,
+        y: currentY,
       })
+      currentY += nodeHeight(nodeTypeMap.get(regularChildren[i]!)) + V_VISUAL_GAP
     }
   }
 
@@ -56,13 +70,20 @@ export function calculateChildPositions(
     const vOffset =
       type === 'package_group' ? HELPER_V_OFFSET_PKG : HELPER_V_OFFSET_HCG
 
+    // Total height of regular children block for helper offset
+    let regularBlockHeight = 0
+    for (const id of regularChildren) {
+      regularBlockHeight += nodeHeight(nodeTypeMap.get(id))
+    }
+    regularBlockHeight += Math.max(0, count - 1) * V_VISUAL_GAP
+
     results.push({
       nodeId: helperId,
       x: parentPosition.x + HELPER_H_OFFSET,
       y:
         parentPosition.y +
         vOffset +
-        (count > 0 ? (count * V_GAP) / 2 + 30 : 0),
+        (count > 0 ? regularBlockHeight / 2 + 30 : 0),
     })
   }
 
@@ -82,6 +103,7 @@ export function adjustSiblingPositions(
   allNodes: Record<string, { id: string; type: string; parentId?: string | null; ownerId?: string }>,
   visibleNodeIds: Set<string>,
   nodePositions: Record<string, { x: number; y: number } | undefined>,
+  allEdges?: Record<string, { id: string; type: string; source: string; target: string }>,
 ): LayoutPosition[] {
   const expandedNode = allNodes[expandedNodeId]
   if (!expandedNode) return []
@@ -101,6 +123,17 @@ export function adjustSiblingPositions(
       siblings.push(n.id)
     }
   }
+  // Also include user_group nodes connected from the parent via manual_link
+  if (allEdges) {
+    for (const edge of Object.values(allEdges)) {
+      if (edge.type === 'manual_link' && edge.source === parentId) {
+        const tgt = allNodes[edge.target]
+        if (tgt?.type === 'user_group' && visibleNodeIds.has(tgt.id) && !siblings.includes(tgt.id)) {
+          siblings.push(tgt.id)
+        }
+      }
+    }
+  }
 
   if (siblings.length <= 1) return []
 
@@ -116,7 +149,7 @@ export function adjustSiblingPositions(
   // Also compute topOffset: distance from the sibling node to the top of its subtree
   const siblingExtents = new Map<string, { height: number; topOffset: number }>()
   for (const sibId of siblings) {
-    const extent = getSubtreeExtent(sibId, allNodes, visibleNodeIds, nodePositions)
+    const extent = getSubtreeExtent(sibId, allNodes, visibleNodeIds, nodePositions, allEdges)
     siblingExtents.set(sibId, extent)
   }
 
@@ -149,7 +182,7 @@ export function adjustSiblingPositions(
       adjustments.push({ nodeId: sibId, x: oldX, y: newY })
 
       // Shift all descendants by the same delta
-      const descShifts = shiftDescendants(sibId, deltaY, allNodes, visibleNodeIds, nodePositions)
+      const descShifts = shiftDescendants(sibId, deltaY, allNodes, visibleNodeIds, nodePositions, allEdges)
       adjustments.push(...descShifts)
     }
 
@@ -161,7 +194,7 @@ export function adjustSiblingPositions(
 
 /**
  * Compute the vertical extent (height) of a node's visible subtree.
- * Returns at least NODE_HEIGHT for a leaf node.
+ * Returns at least NODE_HEIGHT_FOLDER for a leaf node.
  *
  * Also returns topOffset: the distance from the top of the subtree to the node itself.
  * This is needed so the sibling layout can position the node correctly within its
@@ -169,9 +202,10 @@ export function adjustSiblingPositions(
  */
 function getSubtreeExtent(
   nodeId: string,
-  allNodes: Record<string, { id: string; parentId?: string | null; ownerId?: string }>,
+  allNodes: Record<string, { id: string; type?: string; parentId?: string | null; ownerId?: string }>,
   visibleNodeIds: Set<string>,
   nodePositions: Record<string, { x: number; y: number } | undefined>,
+  allEdges?: Record<string, { id: string; type: string; source: string; target: string }>,
 ): { height: number; topOffset: number } {
   // Collect the Y positions of this node and all its visible descendants
   const ys: number[] = []
@@ -197,14 +231,31 @@ function getSubtreeExtent(
         queue.push(n.id)
       }
     }
+
+    // Also traverse manual_link edges from user_group nodes to find their members
+    if (allEdges) {
+      for (const edge of Object.values(allEdges)) {
+        if (
+          edge.type === 'manual_link' &&
+          edge.source === current &&
+          allNodes[current]?.type === 'user_group' &&
+          edge.target !== nodeId &&
+          visibleNodeIds.has(edge.target) &&
+          !visited.has(edge.target)
+        ) {
+          ys.push(nodePositions[edge.target]?.y ?? 0)
+          queue.push(edge.target)
+        }
+      }
+    }
   }
 
-  if (ys.length <= 1) return { height: NODE_HEIGHT, topOffset: 0 }
+  if (ys.length <= 1) return { height: NODE_HEIGHT_FOLDER, topOffset: 0 }
 
   const minY = Math.min(...ys)
   const maxY = Math.max(...ys)
   return {
-    height: Math.max(NODE_HEIGHT, maxY - minY + NODE_HEIGHT),
+    height: Math.max(NODE_HEIGHT_FOLDER, maxY - minY + NODE_HEIGHT_FOLDER),
     topOffset: nodeY - minY,
   }
 }
@@ -215,9 +266,10 @@ function getSubtreeExtent(
 function shiftDescendants(
   nodeId: string,
   deltaY: number,
-  allNodes: Record<string, { id: string; parentId?: string | null; ownerId?: string }>,
+  allNodes: Record<string, { id: string; type?: string; parentId?: string | null; ownerId?: string }>,
   visibleNodeIds: Set<string>,
   nodePositions: Record<string, { x: number; y: number } | undefined>,
+  allEdges?: Record<string, { id: string; type: string; source: string; target: string }>,
 ): LayoutPosition[] {
   const shifts: LayoutPosition[] = []
   const visited = new Set<string>()
@@ -244,6 +296,28 @@ function shiftDescendants(
         queue.push(n.id)
       }
     }
+
+    // Also traverse manual_link edges from user_group nodes
+    if (allEdges) {
+      for (const edge of Object.values(allEdges)) {
+        if (
+          edge.type === 'manual_link' &&
+          edge.source === current &&
+          allNodes[current]?.type === 'user_group' &&
+          edge.target !== nodeId &&
+          visibleNodeIds.has(edge.target) &&
+          !visited.has(edge.target)
+        ) {
+          const pos = nodePositions[edge.target]
+          shifts.push({
+            nodeId: edge.target,
+            x: pos?.x ?? 0,
+            y: (pos?.y ?? 0) + deltaY,
+          })
+          queue.push(edge.target)
+        }
+      }
+    }
   }
 
   return shifts
@@ -259,22 +333,27 @@ const COLLISION_MIN_GAP = 20
 
 export function resolveCollisions(
   movedNodeId: string,
-  allNodes: Record<string, { id: string; parentId?: string | null; ownerId?: string }>,
+  allNodes: Record<string, { id: string; type?: string; parentId?: string | null; ownerId?: string }>,
   visibleNodeIds: Set<string>,
   nodePositions: Record<string, { x: number; y: number } | undefined>,
+  allEdges?: Record<string, { id: string; type: string; source: string; target: string }>,
+  excludeNodeIds?: Set<string>,
 ): LayoutPosition[] {
   const allAdjustments: LayoutPosition[] = []
   // Work on a mutable copy of positions so cascading checks see updated values
   const workingPositions: Record<string, { x: number; y: number } | undefined> = { ...nodePositions }
 
-  const MAX_ITERATIONS = 10
+  const MAX_ITERATIONS = 20
   // Start by checking the moved node; subsequent iterations check pushed nodes
   let nodesToCheck = [movedNodeId]
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const iterAdjustments: LayoutPosition[] = []
     const nextNodesToCheck: string[] = []
-    const alreadyAdjusted = new Set(allAdjustments.map((a) => a.nodeId))
+    const alreadyAdjusted = new Set([
+      ...allAdjustments.map((a) => a.nodeId),
+      ...(excludeNodeIds ?? []),
+    ])
 
     for (const checkId of nodesToCheck) {
       const checkPos = workingPositions[checkId]
@@ -297,7 +376,7 @@ export function resolveCollisions(
           nextNodesToCheck.push(id)
 
           // Also shift descendants
-          const descShifts = shiftDescendants(id, deltaY, allNodes, visibleNodeIds, workingPositions)
+          const descShifts = shiftDescendants(id, deltaY, allNodes, visibleNodeIds, workingPositions, allEdges)
           for (const ds of descShifts) {
             iterAdjustments.push(ds)
             workingPositions[ds.nodeId] = { x: ds.x, y: ds.y }
@@ -314,8 +393,8 @@ export function resolveCollisions(
   return allAdjustments
 }
 
-const APPROX_NODE_W = 200
-const APPROX_NODE_H = 55
+const APPROX_NODE_W = 240
+const APPROX_NODE_H = 74
 
 function isOverlapping(
   a: { x: number; y: number },

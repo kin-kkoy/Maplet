@@ -140,6 +140,10 @@ export function isParseable(fileName: string): boolean {
   return PARSEABLE_EXTENSIONS.has(ext)
 }
 
+export function isBarrelFile(fileName: string): boolean {
+  return /^index\.(ts|tsx|js|jsx)$/.test(fileName)
+}
+
 export function getExtension(fileName: string): string {
   const dot = fileName.lastIndexOf('.')
   if (dot === -1) return ''
